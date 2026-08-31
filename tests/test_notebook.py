@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -85,22 +86,50 @@ def test_every_code_cell_compiles(notebook):
 
 
 def test_no_secrets_are_hardcoded(notebook):
-    """Tokens must come from Colab secrets at runtime, never be baked into the file."""
+    """Tokens must come from Colab secrets at runtime, never be baked into the file.
+
+    Matched on shape (prefix + a long body), not on the bare prefix: the bootstrap cell
+    legitimately mentions `ghp_`, `github_pat_` etc. as literals when naming a token type.
+    """
     text = json.dumps(notebook)
-    for marker in ("ghp_", "github_pat_", "hf_ey", "x-access-token:gh"):
-        assert marker not in text, f"possible hardcoded credential ({marker!r}) in the notebook"
+    patterns = {
+        "GitHub classic PAT": r"gh[pousr]_[A-Za-z0-9]{20,}",
+        "GitHub fine-grained PAT": r"github_pat_[A-Za-z0-9_]{20,}",
+        "Hugging Face token": r"hf_[A-Za-z0-9]{20,}",
+    }
+    for label, pattern in patterns.items():
+        assert not re.search(pattern, text), f"possible hardcoded {label} in the notebook"
 
 
-def test_bootstrap_scrubs_the_clone_token(notebook):
-    """The clone URL carries a PAT; it must not be left behind in .git/config."""
+def test_bootstrap_never_puts_the_token_in_a_url(notebook):
+    """Auth goes in a request header, so no credential can reach .git/config or a log.
+
+    Embedding a PAT in the clone URL leaves it in `.git/config` on the runtime's disk
+    until something scrubs it; a per-command `http.extraHeader` writes nothing at all.
+    """
     bootstrap = next(
-        _source(c) for _, c in _cells(notebook, "code") if "git" in _source(c) and "clone" in _source(c)
+        _source(c) for _, c in _cells(notebook, "code") if "clone" in _source(c)
     )
-    assert "x-access-token" in bootstrap, "expected a token-authenticated clone URL"
-    assert "set-url" in bootstrap, (
-        "the bootstrap cell must run `git remote set-url` to remove the token from "
-        ".git/config after cloning"
+    assert "http.extraHeader" in bootstrap, "expected header-based git authentication"
+    assert not re.search(r"https://[^\s\"']*\{_?TOKEN", bootstrap), (
+        "the token must not be interpolated into a git URL"
     )
+    assert not re.search(r"https://x-access-token:\{", bootstrap), (
+        "the token must not be interpolated into a git URL"
+    )
+
+
+def test_bootstrap_preflights_the_token(notebook):
+    """A bare git failure cannot tell an expired token from a missing repo grant.
+
+    The cell must check the token against the API first so the error names the cause.
+    """
+    bootstrap = next(
+        _source(c) for _, c in _cells(notebook, "code") if "clone" in _source(c)
+    )
+    assert "api.github.com" in bootstrap, "expected an API preflight before cloning"
+    for code in ("401", "403", "404"):
+        assert code in bootstrap, f"preflight should explain HTTP {code} distinctly"
 
 
 def test_outputs_are_not_committed(notebook):
