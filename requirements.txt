@@ -1,0 +1,11 @@
+# Runtime dependencies.
+#
+# NOTE: torch is intentionally NOT pinned to an exact version. Google Colab ships
+# a CUDA-matched torch build; forcing a different version triggers a multi-minute
+# reinstall and can break CUDA. The notebook installs with
+# `--upgrade-strategy only-if-needed` so an existing satisfying torch is kept.
+torch>=2.0
+transformers>=4.40
+numpy>=1.24
+huggingface_hub>=0.23
+tqdm>=4.65

@@ -1,0 +1,248 @@
+# Design decisions
+
+Choices made while building this that were **not** discussed, with the reasoning behind
+each. Decisions that *were* agreed (in-process services, pooled-by-default output, JSON +
+optional sidecar, Colab-secret auth, tiny-then-real default models, layer selection built
+now, and the four extras) are recorded in `architecture.md` and the README instead.
+
+If you disagree with anything here, it is meant to be cheap to reverse — each entry names
+the file to change.
+
+---
+
+## Architecture
+
+### Protocols (`typing.Protocol`) instead of ABCs
+`services/interfaces.py` defines structural types, not base classes. A test double or a
+future HTTP client satisfies `ModelProvider` by having the right methods; it does not have
+to import and subclass anything. That keeps the services genuinely decoupled — `services/`
+has no inheritance graph to reason about — and it is what makes the in-process design
+liftable into real HTTP services later.
+
+### A facade (`Analyzer`) on top of the container
+Three services and a config object is more surface than a notebook cell wants. `Analyzer`
+is the single object the notebook touches, and it owns the loaded model for the session so
+a large model is downloaded and placed on the GPU exactly once. The services stay
+independently constructible; `container.py` only does wiring, and each dependency can be
+injected (`Analyzer(storage_service=...)`).
+
+### Dataclasses, not YAML/Hydra
+The notebook *is* the config surface. Dataclasses give tab-completion, `?` docstrings,
+type checking, and `__post_init__` validation with no extra dependency and no config file
+to keep in sync with a notebook cell. Add YAML only if runs ever need to be launched from
+outside Python.
+
+### `AutoModel`, not `AutoModelForCausalLM`
+The task is hidden states, not next-token prediction. `AutoModel` gives the base
+transformer without the LM head, which is a chunk of parameters and memory (a `vocab ×
+hidden` matrix — hundreds of MB on a large-vocab model) that would never be used. If
+logits are ever needed, that is a second, explicit code path.
+
+### Validation at construction, not at use
+Every config dataclass validates in `__post_init__`. A typo like `pooling="max"` fails on
+the config line, not thirty seconds later inside a forward pass with a `KeyError`. In a
+notebook, where the failure may arrive after a multi-minute model download, this is the
+difference between a one-second fix and a repeated download.
+
+---
+
+## Model loading
+
+### Layer index 0 is the embedding output
+`hidden_states` has length `num_hidden_layers + 1`; index 0 is the embedding output, not
+block 1. Rather than hide that with an off-by-one shim, the convention is exposed
+directly and written into every output file (`layer_index_convention`), along with both the
+requested label and the resolved absolute index. Silent renumbering would make a saved
+`"layer 12"` mean different things in different tools.
+
+### Encoder-decoder models are rejected, not silently handled
+For T5/BART, `outputs.hidden_states` is the **encoder** stack; the decoder's are under
+`decoder_hidden_states`. Saving the former as "the last layer" would be quietly wrong, and
+quietly wrong is worse than unsupported. `model_service._reject_unsupported` raises with an
+explanation. Supporting them properly means a config choice of which stack to read.
+
+### `pad_token = eos_token` when a tokenizer has none
+GPT-2-family tokenizers ship no PAD token, which makes batching impossible. Reusing EOS is
+the standard fix and is safe here because the attention mask excludes those positions from
+both the forward pass and pooling. The vocabulary is **not** resized, so the model's
+embedding matrix is untouched. The substitution is logged and recorded in the manifest as
+`pad_token_substituted`.
+
+### bfloat16 preferred over float16 on capable GPUs
+Same speed, but fp32's exponent range. Deep residual streams in large models can produce
+activations that overflow fp16 to `inf`; bf16 does not. CPU always gets fp32 — many
+kernels have no fp16 CPU implementation and those that do are slower than fp32.
+
+### Hidden states are always cast to float32 before leaving the device
+The compute dtype is a performance choice; it should not change what a saved file
+contains. Casting to fp32 on the way out means a bf16 run on an A100 and an fp32 run on a
+CPU produce comparable numbers, and JSON never has to represent a bf16 value.
+
+### `trust_remote_code` defaults to `False`
+It executes arbitrary Python from a Hub repo at load time. Opt-in per model, with an error
+message that says exactly that when a model needs it.
+
+### Hub errors are translated, not re-raised raw
+`GatedRepoError` and a bare 401 are useless from a notebook. `_explain_load_failure` turns
+them into numbered instructions naming the exact Colab secret to add and the licence page
+to accept. This is the most likely first-run failure, so it gets the best error message.
+
+---
+
+## Inference
+
+### `invoke()` is `batch()` of one
+One code path, so the two APIs cannot drift in pooling, truncation, dtype, or masking.
+`test_invoke_and_batch_agree_exactly` pins this. `invoke` raises on failure while `batch`
+collects failures, because a single call has no partial-success story to tell.
+
+### Last-token pooling scans the mask from the right
+The common idiom `hidden[torch.arange(n), attention_mask.sum(1) - 1]` is correct **only**
+for right padding; on a left-padded batch it lands on the *first* real token. This code
+uses `mask.flip(1).argmax(1)` to find the last real token from the right, which is correct
+under either padding side. This is not hypothetical — it was caught by
+`test_last_token_ignores_padding_side` during development, and
+`test_naive_last_index_would_be_wrong` now guards the naive alternative.
+
+### Inputs are length-sorted before batching, then restored to input order
+Padding every batch to its own longest member wastes compute proportional to the length
+spread. Sorting groups similar lengths together; the original indices are carried through
+so the returned records are in input order. Off via `sort_by_length=False`.
+
+### OOM halves the batch instead of aborting
+A CUDA OOM three hours into a run is expensive. `_run_chunk` catches it, halves, empties
+the cache, and retries down to size 1; only a single input that still OOMs becomes a
+failure, with a hint about `max_length` and pooling. Colab GPU memory varies by session,
+so a batch size that worked yesterday can fail today — the pipeline absorbs that.
+
+### One bad item does not kill a run
+Per-item exceptions become `ExtractionFailure` records that travel with the results and
+land in the output JSON. Losing 9,999 good results to item 5,000 is not acceptable
+behaviour for a batch API. Set `continue_on_error=False` to get the old behaviour.
+
+### Untruncated length is probed with a second tokenizer call
+Detecting truncation requires knowing the length that *would* have been produced. That
+costs one extra (cheap, CPU-side) tokenizer pass per input. Worth it: silently analysing a
+clipped prompt is a wrong result that looks like a right one. Both counts land in the
+record (`token_count`, `original_token_count`, `truncated`).
+
+### Item ids are `sha256(text)[:16]`, not positional indices
+Content-derived ids are stable across runs and files, which makes two result files
+joinable and duplicates detectable. 16 hex characters (64 bits) is ample here. A positional
+index would break the moment the input list is reordered or filtered.
+
+### Empty and whitespace-only inputs are rejected, not silently pooled
+They tokenize to zero real tokens, so there is nothing to pool — the result would be a
+degenerate or garbage vector. An explicit `ValueError` naming the offending index is
+better than a plausible-looking number.
+
+### `max_length_cap` (default 4096) on top of the model's context
+A 128k-context model would otherwise let a single long input allocate an enormous
+activation tensor and OOM a Colab GPU instantly. The cap is a guard rail, logged when it
+bites, and raised in config when you actually want long contexts.
+
+---
+
+## Storage
+
+### JSON is the index; the `.npz` sidecar holds the bulk
+Text floats are big and slow: per-token states from a 4096-hidden model can be tens of MB
+of JSON that no editor opens and that takes seconds to parse. Above
+`npy_threshold_floats` (default 1M) the raw float32 arrays move into a compressed `.npz`
+and the JSON keeps `values: null` plus an `npy_ref`. `load_run()` rehydrates transparently,
+so callers never branch on which mode was used. Force either mode with
+`npy_mode="always"` / `"never"`.
+
+### Floats are rounded to 6 decimals in JSON
+Full float32 repr is ~17 characters of mostly noise per value. Six decimals keeps the file
+readable and roughly 40% smaller, and the sidecar keeps the lossless copy when precision
+matters. Tune with `float_precision`.
+
+### NaN/inf are serialised as `null`, with a warning
+JSON has no `NaN` or `Infinity` literals; Python's `json` emits them anyway, producing
+files that other parsers reject. Nulling them keeps the file valid, and the warning points
+at the real cause (usually low-precision overflow).
+
+### Writes are atomic (temp file + `os.replace`)
+A Colab runtime can be recycled mid-write. Without this you get a truncated JSON that
+still parses as *something*. With it, the output file either does not exist or is complete.
+
+### `run_id` is a UTC timestamp, and filenames are sanitised
+Timestamps sort chronologically in a file listing, which is what you want when scanning a
+results directory. Names are stripped to `[A-Za-z0-9-_.]` so they survive Drive, Windows,
+and shell globbing.
+
+### The effective config travels with the result
+`BatchResult.extraction` records the settings that actually ran, including per-call
+overrides, and `Analyzer.save()` builds the manifest from it. Otherwise
+`analyzer.batch(texts, pooling="none")` would be saved under a manifest claiming
+`pooling="last_token"` — a file that lies about its own contents.
+
+### Input text can be withheld (`include_input_text=False`)
+Ids still allow joining results back to the inputs, but the corpus itself need not be
+duplicated into every output file. Useful for sensitive or large text.
+
+---
+
+## Environment and secrets
+
+### Secrets resolve Colab → env → `None`, and `None` is a success
+The same code runs unchanged in Colab, in CI, and locally. Crucially, no token is the
+*normal* path: ungated models load fine anonymously, so a missing `HF_TOKEN` must not be
+an error. Switching to a gated model later requires adding a secret, not editing code.
+
+### The clone token is scrubbed from `.git/config` immediately
+The notebook clones with `https://x-access-token:<token>@github.com/...`, then runs
+`git remote set-url origin <clean url>`. Without that second step the PAT sits in
+`.git/config` on the runtime's disk, and anyone the notebook is shared with after a run
+could read it. Git errors are also filtered before printing, in case a URL leaks into one.
+
+### `torch` is not pinned to an exact version
+Colab ships a torch build matched to its CUDA driver. Forcing a different version triggers
+a multi-minute reinstall and can break GPU support outright. `requirements.txt` asks for
+`torch>=2.0` and the notebook installs with `--upgrade-strategy only-if-needed`, so an
+existing satisfying torch is kept.
+
+### Logging attaches exactly one handler, and never propagates
+Re-running a notebook cell that imports the package would otherwise stack handlers and
+print every line 2×, 3×, 4× — a classic Colab annoyance. `configure_logging` is idempotent
+and sets `propagate = False` so Colab's root logger does not double them either.
+
+### Strict determinism is opt-in
+Seeding is always on. `torch.use_deterministic_algorithms(True)` is not: it is slower, and
+it raises on ops with no deterministic implementation. Even with it, results are only
+reproducible on the *same* GPU model and library versions — cuBLAS reduction order differs
+across hardware. The manifest records the seed and every relevant version so a run can be
+described exactly, which is the achievable goal.
+
+---
+
+## Testing
+
+### Tests build a tiny model locally instead of downloading one
+`testing.build_tiny_local_model` writes a randomly-initialised 4-layer, 16-hidden GPT-2 and
+a word-level tokenizer to a temp directory, then loads it through the *same*
+`from_pretrained` path a real model uses. The suite runs in seconds, needs no network, and
+cannot be broken by a Hub outage. Its tokenizer deliberately ships **no** pad token, so
+every test run exercises the eos-as-pad fallback.
+
+### `test_architecture_doc.py` enforces the documentation rule
+The requirement to keep `architecture.md` current is enforced by a test rather than by
+memory: adding a file without documenting it fails the suite, naming the file.
+
+---
+
+## Deliberately not built yet
+
+Each of these is a real gap, listed so it is a decision rather than an oversight.
+
+| Not built | Why, and what it would take |
+|---|---|
+| **Chat templates for instruct models** | Inputs go in as raw text. `Qwen2.5-0.5B-**Instruct**` was trained with a chat template; hidden states for `"hello"` differ from those for the templated version. For layer *analysis* raw text is usually what you want, and applying a template silently would be a hidden transformation. Add `apply_chat_template: bool` to `ExtractionConfig` when you need it — it is a few lines in `_forward`. |
+| **Attention weights** | `output_attentions=True` in the same forward pass, plus a records/storage shape. Attention is `layers × heads × seq × seq` — far bigger than hidden states, so it needs its own storage policy. |
+| **Middle-layer *aggregation*** (e.g. mean of layers 8–16) | Selection is built; combining several layers into one vector is not. Belongs next to `utils/pooling.py` as a second, layer-axis reduction. |
+| **Long-document chunking** | Inputs longer than the context are truncated and flagged, not split-and-stitched. Sliding-window chunking plus a merge policy is a design question of its own. |
+| **Quantized loading (`bitsandbytes`, GPTQ)** | Would let bigger models fit a T4. Quantization changes hidden-state values, so it needs to be recorded in the manifest and thought about before results are compared across runs. |
+| **Multi-GPU / `device_map="auto"`** | Single-device only. Colab gives one GPU; `accelerate` sharding adds real complexity for no benefit there. |
+| **Cross-run comparison utilities** | Cosine similarity, layer-wise drift, projections. Deliberately out of scope: this repo's job is producing trustworthy, self-describing files; analysis is downstream and better done in a notebook against `load_run()`. |
+| **Streaming / incremental writes** | A run is held in memory and written once. For a very large corpus, an append-mode sink (JSONL + a growing `.npz`) satisfying `ResultSink` would be the change. |
