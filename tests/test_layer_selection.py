@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.conftest import TINY_LAYERS
+from m1_analyzer.testing import TINY_LAYERS
 
 
 def test_last_layer_is_the_final_block(loaded_model):
@@ -49,7 +49,7 @@ def test_unknown_keyword_raises(loaded_model):
 
 
 def test_effective_max_length_respects_model_and_cap(loaded_model):
-    from tests.conftest import TINY_MAX_POSITIONS
+    from m1_analyzer.testing import TINY_MAX_POSITIONS
 
     assert loaded_model.effective_max_length(None, 4096) == TINY_MAX_POSITIONS
     assert loaded_model.effective_max_length(8, 4096) == 8

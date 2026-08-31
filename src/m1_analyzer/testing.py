@@ -15,6 +15,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+#: Shape of the model `build_tiny_local_model` produces. Tests assert against these, so
+#: they live here rather than in `tests/conftest.py`: a test module importing
+#: `tests.conftest` only resolves when the repo root happens to be on `sys.path`, which is
+#: true for `python -m pytest` but not for the `pytest` console script.
+TINY_LAYERS = 4
+TINY_HIDDEN = 16
+TINY_MAX_POSITIONS = 32
+
 DEFAULT_VOCAB = [
     "[UNK]", "[PAD]", "[EOS]",
     "hello", "world", "the", "quick", "brown", "fox", "jumps", "over", "lazy",
@@ -26,9 +34,9 @@ DEFAULT_VOCAB = [
 def build_tiny_local_model(
     directory: str | Path,
     *,
-    num_layers: int = 4,
-    hidden_size: int = 16,
-    max_positions: int = 32,
+    num_layers: int = TINY_LAYERS,
+    hidden_size: int = TINY_HIDDEN,
+    max_positions: int = TINY_MAX_POSITIONS,
 ) -> str:
     """Create a tiny GPT-2 model + tokenizer on disk. Returns the directory path.
 

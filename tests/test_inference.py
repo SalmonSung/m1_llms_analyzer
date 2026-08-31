@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from m1_analyzer.domain.records import make_item_id
-from tests.conftest import TINY_HIDDEN, TINY_LAYERS
+from m1_analyzer.testing import TINY_HIDDEN, TINY_LAYERS
 
 
 def test_invoke_returns_pooled_vector(analyzer):

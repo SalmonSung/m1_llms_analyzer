@@ -251,6 +251,16 @@ The suite also executes the notebook end-to-end during development (via `nbclien
 the model ids redirected at a locally-built tiny model) — a check that a static parse
 cannot substitute for.
 
+### Shared test constants live in the package, not in `conftest.py`
+
+`from tests.conftest import TINY_HIDDEN` resolves only when the repo root is on
+`sys.path`. `python -m pytest` prepends the cwd, so it works; the `pytest` console script
+does not, so it fails at collection. The suite passed under one invocation and could not
+collect under the other -- and the README documents the broken one. The tiny-model shape
+now lives in `m1_analyzer.testing` beside the builder that produces it, which is
+importable however pytest is started, and `tests/test_imports.py` fails if any test module
+imports `tests.*` again.
+
 ### `test_architecture_doc.py` enforces the documentation rule
 The requirement to keep `architecture.md` current is enforced by a test rather than by
 memory: adding a file without documenting it fails the suite, naming the file.
