@@ -36,6 +36,7 @@ lives in `design_decisions.md`; this file is the checklist.
 | 27 | **`trust_remote_code` models** | Loading fails with an opaque message, or executes untrusted code without the user realising. | Off by default; the error says exactly which flag to set and what it means. | `model_service._explain_load_failure` |
 | 28 | **Unsafe output filenames** | A name with `/` or `:` breaks on Drive/Windows or writes to the wrong directory. | Sanitised to `[A-Za-z0-9-_.]`. | `storage_service._sanitize` |
 | 29 | **Missing sidecar after moving files** | Copying only the `.json` gives a `KeyError` or silent `None` values. | `load_run()` raises a message saying to keep the `.json` and `.npz` together. | `storage_service.load_run` |
+| 31 | **Notebook `source` lines without trailing newlines** | `nbformat` validates and the JSON parses, but Colab concatenates `source` elements verbatim — every cell renders as one enormous line and no code cell runs. | Enforced by a test that checks each element (bar the last) ends in `\n`, and that code cells compile when joined with `""`, the way a reader joins them. | `tests/test_notebook.py` |
 | 30 | **Padding rows in per-token output** | A `[seq_len, hidden]` matrix that includes PAD rows makes token counts wrong downstream. | `unpad_sequence` trims each item to its real tokens; one row per real token, asserted in tests. | `utils/pooling.unpad_sequence` |
 
 ## Known limits (not handled — by choice)

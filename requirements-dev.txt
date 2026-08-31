@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=7.4
+# Backs tests/test_notebook.py (validity of the Colab entrypoint).
+nbformat>=5.9

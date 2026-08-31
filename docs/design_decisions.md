@@ -226,6 +226,19 @@ a word-level tokenizer to a temp directory, then loads it through the *same*
 cannot be broken by a Hub outage. Its tokenizer deliberately ships **no** pad token, so
 every test run exercises the eos-as-pad fallback.
 
+### The notebook is tested by joining its source the way a reader does
+
+`tests/test_notebook.py` joins each cell's `source` with `""`, not `"\n"`. This is not a
+detail: the notebook shipped once with every `source` element missing its trailing
+newline. `nbformat.validate` passed, the JSON parsed, and a syntax check that joined with
+`"\n"` passed too — but Colab, which concatenates verbatim, rendered every cell as a
+single unrunnable line. Only the `""` join reproduces what a reader actually sees, so it
+is the only join the tests use.
+
+The suite also executes the notebook end-to-end during development (via `nbclient`, with
+the model ids redirected at a locally-built tiny model) — a check that a static parse
+cannot substitute for.
+
 ### `test_architecture_doc.py` enforces the documentation rule
 The requirement to keep `architecture.md` current is enforced by a test rather than by
 memory: adding a file without documenting it fails the suite, naming the file.

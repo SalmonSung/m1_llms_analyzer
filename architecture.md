@@ -109,6 +109,10 @@ m1_llms_analyzer/
     │                              fallback, per-token shapes.
     ├── test_storage.py            JSON schema, rounding, sidecar policy, lossless round-trip,
     │                              atomicity, filename sanitising, manifest correctness.
+    ├── test_notebook.py           Guards the Colab entrypoint: nbformat validity, every
+    │                              source line keeps its trailing newline, code cells compile
+    │                              when joined the way a reader joins them, no hardcoded
+    │                              secrets, clone token scrubbed, no committed outputs.
     └── test_architecture_doc.py   Fails if this file omits any source file.
 ```
 
