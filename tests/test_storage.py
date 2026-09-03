@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from m1_analyzer import load_run
-from tests.conftest import TINY_HIDDEN
+from m1_analyzer.testing import TINY_HIDDEN
 
 
 def _write(analyzer, texts, name="run"):

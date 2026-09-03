@@ -191,11 +191,23 @@ The same code runs unchanged in Colab, in CI, and locally. Crucially, no token i
 *normal* path: ungated models load fine anonymously, so a missing `HF_TOKEN` must not be
 an error. Switching to a gated model later requires adding a secret, not editing code.
 
-### The clone token is scrubbed from `.git/config` immediately
-The notebook clones with `https://x-access-token:<token>@github.com/...`, then runs
-`git remote set-url origin <clean url>`. Without that second step the PAT sits in
-`.git/config` on the runtime's disk, and anyone the notebook is shared with after a run
-could read it. Git errors are also filtered before printing, in case a URL leaks into one.
+### The clone token never enters the URL at all
+Auth is passed as a per-command `git -c http.extraHeader=...` value rather than embedded
+in the clone URL. A URL-embedded PAT is written into `.git/config` on the runtime's disk
+and has to be scrubbed afterwards -- which only works if the scrub actually runs, so any
+failure between clone and scrub leaves a live credential behind. A per-command config
+value writes nothing, so there is nothing to clean up. Git errors are filtered before
+printing, and the header itself is replaced with `<auth>` in any command echoed to output.
+
+### The bootstrap cell preflights the token against the API
+`git clone` reports every credential problem as `Invalid username or token`, which covers
+an expired token, a typo, a missing repository grant, and un-authorised SAML SSO alike --
+four different fixes behind one message. Two API calls (`/user`, then
+`/repos/{owner}/{repo}`) separate them before git runs, so a 401 says "the token is bad",
+a 404 says "the token is fine but has no grant on this repo", and a 403 points at SSO.
+This costs two HTTP requests and turns the single most likely first-run failure from a
+dead end into an instruction. A git failure *after* a passing preflight is reported
+separately, since the obvious causes have just been ruled out.
 
 ### `torch` is not pinned to an exact version
 Colab ships a torch build matched to its CUDA driver. Forcing a different version triggers
@@ -225,6 +237,29 @@ a word-level tokenizer to a temp directory, then loads it through the *same*
 `from_pretrained` path a real model uses. The suite runs in seconds, needs no network, and
 cannot be broken by a Hub outage. Its tokenizer deliberately ships **no** pad token, so
 every test run exercises the eos-as-pad fallback.
+
+### The notebook is tested by joining its source the way a reader does
+
+`tests/test_notebook.py` joins each cell's `source` with `""`, not `"\n"`. This is not a
+detail: the notebook shipped once with every `source` element missing its trailing
+newline. `nbformat.validate` passed, the JSON parsed, and a syntax check that joined with
+`"\n"` passed too — but Colab, which concatenates verbatim, rendered every cell as a
+single unrunnable line. Only the `""` join reproduces what a reader actually sees, so it
+is the only join the tests use.
+
+The suite also executes the notebook end-to-end during development (via `nbclient`, with
+the model ids redirected at a locally-built tiny model) — a check that a static parse
+cannot substitute for.
+
+### Shared test constants live in the package, not in `conftest.py`
+
+`from tests.conftest import TINY_HIDDEN` resolves only when the repo root is on
+`sys.path`. `python -m pytest` prepends the cwd, so it works; the `pytest` console script
+does not, so it fails at collection. The suite passed under one invocation and could not
+collect under the other -- and the README documents the broken one. The tiny-model shape
+now lives in `m1_analyzer.testing` beside the builder that produces it, which is
+importable however pytest is started, and `tests/test_imports.py` fails if any test module
+imports `tests.*` again.
 
 ### `test_architecture_doc.py` enforces the documentation rule
 The requirement to keep `architecture.md` current is enforced by a test rather than by

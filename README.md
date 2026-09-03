@@ -178,7 +178,7 @@ When a run exceeds `npy_threshold_floats` (1M by default), `values` becomes `nul
 ## Tests
 
 ```bash
-pytest -q                              # ~80 tests, fully offline, a few seconds
+pytest -q                              # 143 tests, fully offline, a few seconds
 python scripts/smoke_test.py --offline # end-to-end without the Hub
 ```
 

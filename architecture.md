@@ -47,6 +47,9 @@ m1_llms_analyzer/
 │   │                              terminal or CI; reads inputs from flags, lines, JSON, JSONL.
 │   ├── testing.py                 Builds a tiny random GPT-2 + tokenizer on disk, offline.
 │   │                              Backs the test suite and `smoke_test.py --offline`.
+│   │                              Also owns TINY_LAYERS / TINY_HIDDEN /
+│   │                              TINY_MAX_POSITIONS, the shape tests assert against, so
+│   │                              no test needs to import `tests.conftest`.
 │   │
 │   ├── config/
 │   │   ├── __init__.py            Re-exports the config dataclasses.
@@ -109,6 +112,14 @@ m1_llms_analyzer/
     │                              fallback, per-token shapes.
     ├── test_storage.py            JSON schema, rounding, sidecar policy, lossless round-trip,
     │                              atomicity, filename sanitising, manifest correctness.
+    ├── test_imports.py            Guards import hygiene: no test module may import
+    │                              `tests.*`, which resolves only when the repo root is on
+    │                              sys.path (true for `python -m pytest`, false for the
+    │                              `pytest` console script).
+    ├── test_notebook.py           Guards the Colab entrypoint: nbformat validity, every
+    │                              source line keeps its trailing newline, code cells compile
+    │                              when joined the way a reader joins them, no hardcoded
+    │                              secrets, clone token scrubbed, no committed outputs.
     └── test_architecture_doc.py   Fails if this file omits any source file.
 ```
 

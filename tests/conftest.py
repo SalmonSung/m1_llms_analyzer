@@ -11,11 +11,14 @@ import pytest
 
 from m1_analyzer import Analyzer, ExtractionConfig, ModelConfig, RunConfig, StorageConfig
 from m1_analyzer.services.model_service import ModelService
-from m1_analyzer.testing import build_tiny_local_model
+from m1_analyzer.testing import (
+    TINY_HIDDEN,
+    TINY_LAYERS,
+    TINY_MAX_POSITIONS,
+    build_tiny_local_model,
+)
 
-TINY_LAYERS = 4
-TINY_HIDDEN = 16
-TINY_MAX_POSITIONS = 32
+__all__ = ["TINY_HIDDEN", "TINY_LAYERS", "TINY_MAX_POSITIONS"]
 
 
 @pytest.fixture(scope="session")
