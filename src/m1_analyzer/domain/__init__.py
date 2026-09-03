@@ -4,6 +4,8 @@ from .records import (
     ExtractionRecord,
     LayerState,
     RunManifest,
+    ScoreResult,
+    SentenceScore,
     WrittenPaths,
     make_item_id,
 )
@@ -14,6 +16,8 @@ __all__ = [
     "ExtractionRecord",
     "LayerState",
     "RunManifest",
+    "ScoreResult",
+    "SentenceScore",
     "WrittenPaths",
     "make_item_id",
 ]

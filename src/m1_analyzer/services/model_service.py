@@ -14,6 +14,14 @@ Layer indexing convention
 So on a 24-block model, ``-1`` and ``24`` are the same tensor, and the "middle"
 layer is block ``N // 2``. Both the label you asked for and the resolved absolute
 index are written into every output file, so a saved result is never ambiguous.
+
+Heads
+-----
+``ModelConfig.head`` picks the class: ``"base"`` loads ``AutoModel`` (the bare
+transformer, hidden states only) and ``"causal_lm"`` loads
+``AutoModelForCausalLM`` (adds the language-model head, so next-token
+log-probabilities can be scored). A causal-LM model still returns hidden
+states, so extraction works with either; the base head is simply lighter.
 """
 
 from __future__ import annotations
@@ -62,12 +70,13 @@ class ModelService:
         if self._model is not None:
             return self
 
-        from transformers import AutoConfig, AutoModel, AutoTokenizer
+        from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, AutoTokenizer
 
         token = resolve_hf_token(self.config.hf_token)
         log.info(
-            "Loading %s (revision=%s, hf_token=%s)",
+            "Loading %s (head=%s, revision=%s, hf_token=%s)",
             self.config.model_id,
+            self.config.head,
             self.config.revision or "default",
             redact(token),
         )
@@ -88,6 +97,9 @@ class ModelService:
             raise self._explain_load_failure(exc) from exc
 
         self._reject_unsupported(hf_config)
+        if self.config.head == "causal_lm":
+            self._require_causal_lm(hf_config)
+        loader = AutoModelForCausalLM if self.config.head == "causal_lm" else AutoModel
 
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(self.config.model_id, **common)
@@ -98,12 +110,12 @@ class ModelService:
         self._dtype = resolve_dtype(self._device, self.config.dtype)
 
         try:
-            self._model = AutoModel.from_pretrained(
+            self._model = loader.from_pretrained(
                 self.config.model_id, config=hf_config, dtype=self._dtype, **common
             )
         except TypeError:
             # transformers < 4.56 spells the argument `torch_dtype`.
-            self._model = AutoModel.from_pretrained(
+            self._model = loader.from_pretrained(
                 self.config.model_id, config=hf_config, torch_dtype=self._dtype, **common
             )
         except Exception as exc:  # noqa: BLE001
@@ -164,6 +176,21 @@ class ModelService:
             raise UnsupportedArchitectureError(
                 f"{self.config.model_id} appears to be a multimodal/vision model. This pipeline "
                 "feeds text only; load a text model or extend ModelService."
+            )
+
+    def _require_causal_lm(self, hf_config: Any) -> None:
+        """The causal head only exists for decoder-only architectures."""
+        try:
+            from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+        except Exception:  # pragma: no cover - very old transformers
+            return
+        model_type = getattr(hf_config, "model_type", None)
+        if model_type not in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES:
+            raise UnsupportedArchitectureError(
+                f"{self.config.model_id} (model_type={model_type!r}) has no causal language-"
+                "model head in transformers, so it cannot score next-token log-probabilities. "
+                "Use a decoder-only model (GPT-2, Qwen, Llama, OLMo, ...) with head='causal_lm', "
+                "or head='base' for hidden states only."
             )
 
     def _explain_load_failure(self, exc: Exception) -> ModelLoadError:
@@ -352,6 +379,7 @@ class ModelService:
         return {
             "model_id": self.config.model_id,
             "revision": self._resolved_revision,
+            "head": self.config.head,
             "architecture": self.architecture,
             "model_type": getattr(self.hf_config, "model_type", None),
             "num_hidden_layers": self.num_hidden_layers,

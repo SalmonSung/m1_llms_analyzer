@@ -8,9 +8,14 @@ Typical use (see notebooks/colab_entrypoint.ipynb)::
     record   = analyzer.invoke("hello world")
     result   = analyzer.batch(["one", "two", "three"])
     paths    = analyzer.save(result, name="my_run")
+
+Sentence log-probabilities for the experiments (see notebooks/experiment_1b.ipynb)::
+
+    scorer = Analyzer.for_scoring("Qwen/Qwen3-0.6B-Base")
+    scorer.score_one("The tall man opened the door.").mean_logprob
 """
 
-from .config.settings import ExtractionConfig, ModelConfig, RunConfig, StorageConfig
+from .config.settings import ExtractionConfig, ModelConfig, RunConfig, ScoringConfig, StorageConfig
 from .container import Analyzer
 from .domain.records import (
     BatchResult,
@@ -18,10 +23,13 @@ from .domain.records import (
     ExtractionRecord,
     LayerState,
     RunManifest,
+    ScoreResult,
+    SentenceScore,
     WrittenPaths,
 )
 from .services.inference_service import InferenceService
 from .services.model_service import ModelLoadError, ModelService, UnsupportedArchitectureError
+from .services.scoring_service import LogProbService
 from .services.storage_service import StorageService, load_run
 from .utils.env import in_colab, resolve_hf_token
 from .utils.logging import configure_logging, get_logger
@@ -33,15 +41,19 @@ __all__ = [
     "RunConfig",
     "ModelConfig",
     "ExtractionConfig",
+    "ScoringConfig",
     "StorageConfig",
     "BatchResult",
     "ExtractionRecord",
     "ExtractionFailure",
     "LayerState",
     "RunManifest",
+    "ScoreResult",
+    "SentenceScore",
     "WrittenPaths",
     "ModelService",
     "InferenceService",
+    "LogProbService",
     "StorageService",
     "ModelLoadError",
     "UnsupportedArchitectureError",

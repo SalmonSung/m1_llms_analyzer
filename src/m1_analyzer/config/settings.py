@@ -22,6 +22,17 @@ NPY_MODES = ("auto", "always", "never")
 #: A layer spec is an int, a list of ints, or one of these keywords.
 LAYER_KEYWORDS = ("all", "last", "middle")
 
+#: Which head to load. "base" is the bare transformer (hidden states only);
+#: "causal_lm" adds the language-model head so next-token log-probabilities can
+#: be scored. A causal-LM model still exposes hidden states, so extraction works
+#: with either head; the base head is simply lighter.
+MODEL_HEADS = ("base", "causal_lm")
+
+#: How the scorer starts a sequence. "auto" prepends the tokenizer's BOS token
+#: (falling back to EOS, which GPT-2 and Qwen use as their document separator)
+#: so the first real token is predicted too; "none" scores the text as given.
+BOS_POLICIES = ("auto", "none")
+
 LayerSpec = Union[int, str, Sequence[Union[int, str]]]
 
 
@@ -40,11 +51,15 @@ class ModelConfig:
     hf_token: str | None = None
     #: Local HF cache dir (Colab default is fine; set to a Drive path to persist).
     cache_dir: str | None = None
+    #: "base" (hidden states only) or "causal_lm" (adds the LM head for scoring).
+    head: str = "base"
 
     def __post_init__(self) -> None:
         if not self.model_id or not self.model_id.strip():
             raise ValueError("model_id must be a non-empty string.")
         self.model_id = self.model_id.strip()
+        if self.head not in MODEL_HEADS:
+            raise ValueError(f"head must be one of {MODEL_HEADS}, got {self.head!r}")
 
 
 @dataclass
@@ -81,6 +96,37 @@ class ExtractionConfig:
 
 
 @dataclass
+class ScoringConfig:
+    """How sentence log-probabilities are computed (requires ``head="causal_lm"``)."""
+
+    batch_size: int = 64
+    #: None -> the model's own context length (capped by max_length_cap).
+    max_length: int | None = None
+    #: Scored texts are short sentences; a low cap keeps the logits tensor small.
+    max_length_cap: int = 512
+    bos_policy: str = "auto"      # auto | none
+    #: Sort inputs by token length before batching to cut padding waste.
+    sort_by_length: bool = True
+    #: Record a non-finite or failing item instead of raising.
+    continue_on_error: bool = True
+    #: Sequences per sub-chunk when reducing the logits in float32. Lower it if
+    #: a large-vocabulary model still runs out of memory at batch_size=1.
+    logit_chunk: int = 8
+
+    def __post_init__(self) -> None:
+        if self.batch_size < 1:
+            raise ValueError("batch_size must be >= 1.")
+        if self.max_length is not None and self.max_length < 1:
+            raise ValueError("max_length must be >= 1 when set.")
+        if self.max_length_cap < 1:
+            raise ValueError("max_length_cap must be >= 1.")
+        if self.bos_policy not in BOS_POLICIES:
+            raise ValueError(f"bos_policy must be one of {BOS_POLICIES}, got {self.bos_policy!r}")
+        if self.logit_chunk < 1:
+            raise ValueError("logit_chunk must be >= 1.")
+
+
+@dataclass
 class StorageConfig:
     """Where and how results are persisted."""
 
@@ -103,11 +149,12 @@ class StorageConfig:
 
 @dataclass
 class RunConfig:
-    """The single object the notebook edits: model + extraction + storage + seed."""
+    """The single object the notebook edits: model + extraction + scoring + storage + seed."""
 
     model: ModelConfig = field(default_factory=ModelConfig)
     extraction: ExtractionConfig = field(default_factory=ExtractionConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
     seed: int = 42
     #: Opt into torch deterministic algorithms (slower; may raise on some ops).
     strict_determinism: bool = False
