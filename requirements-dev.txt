@@ -2,3 +2,5 @@
 pytest>=7.4
 # Backs tests/test_notebook.py (validity of the Colab entrypoint).
 nbformat>=5.9
+# Only for experiment_figures.py's mock renderer (`python -m m1_analyzer.experiments.experiment_figures`).
+pillow>=9.0
