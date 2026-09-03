@@ -1,13 +1,19 @@
 # m1_llms_analyzer
 
-Extract hidden states from open-source Hugging Face models and save them as JSON.
-Built as in-process microservices, driven from a single Google Colab notebook.
+Extract hidden states from open-source Hugging Face models and save them as JSON, and run
+sentence-structure experiments on the same models' log-probabilities. Built as in-process
+microservices, driven from Google Colab notebooks.
 
 - **`invoke(text)`** — one input, one record.
 - **`batch(texts)`** — many inputs, order preserved, OOM-safe, failures isolated.
 - **Any layer** — `-1` (last), `0` (embeddings), `"middle"`, `"all"`, or a list.
 - **Pooled or per-token** — `last_token` (default), `mean`, `cls`, or `none`.
 - **JSON out** — self-describing, with a lossless `.npz` sidecar when a run is large.
+- **`score(texts)`** — sentence log-probabilities (mean per token = the fluency of the
+  teaching doc), when the model is loaded with its LM head.
+- **Experiments** — Task 1b (bracket induction from substitution costs) end to end:
+  treebank gold, span scoring with a resumable cache, induction, baselines, bootstrap
+  intervals, and the runbook's figure. See [Experiments](#experiments).
 
 ---
 
@@ -78,18 +84,60 @@ python scripts/run_extraction.py \
 
 ---
 
+## Experiments
+
+`notebooks/experiment_1b.ipynb` runs **Task 1b — does substitution FIND constituents?**
+Same two secrets as above, a GPU runtime, *Run all*. It smoke-tests the whole chain on a
+tiny model, loads 1000 sentences of the free NLTK Penn Treebank sample with their gold
+brackets, scores every span × proform variant on `Qwen/Qwen3-0.6B-Base` (phase A, GPU,
+resumable), induces a bracketing per sentence and scores it against gold and the trivial
+baselines (phase B, CPU, seconds), then draws `fig_1b` and `fig_0c` and copies everything to
+Drive. Background: `theory_1b_bracket_induction.md` (outside this repo).
+
+The same pieces from Python:
+
+```python
+from m1_analyzer import Analyzer
+from m1_analyzer.experiments import (
+    MinOverSet, analyse_1b, compute_span_costs, load_ptb_nltk, verdict, experiment_figures as EF,
+)
+
+analyzer  = Analyzer.for_scoring("Qwen/Qwen3-0.6B-Base")        # loads the LM head
+analyzer.score_one("The tall man opened the door.").mean_logprob  # nats per predicted token
+
+sentences = load_ptb_nltk(1000, min_len=5, max_len=30, seed=42)  # gold brackets included
+policy    = MinOverSet(["it", "there", "did", "then"])            # blind: cheapest proform wins
+tables    = compute_span_costs(analyzer, sentences, policy,       # phase A, cached + resumable
+                               cache_path="outputs/task_1b/span_costs.jsonl",
+                               provenance={"model_id": "Qwen/Qwen3-0.6B-Base"})
+record    = analyse_1b(tables, sentences, policy=policy, inducer="greedy",
+                       model="Qwen/Qwen3-0.6B-Base")              # phase B: the fig_1b record
+print(verdict(record))
+EF.fig_1b(record, path="outputs/task_1b/fig_1b.png")
+```
+
+Conventions that the numbers depend on (all recorded in the output): traces and
+punctuation removed from the treebank, unaries collapsed, unlabelled spans, single words
+and the whole sentence excluded; cost = mean log-probability per token of the sentence
+minus that of the variant; a BOS token prepended so every real token is predicted; F1 is
+the sentence-level mean with a 95% bootstrap over sentences (corpus micro F1 in
+`diagnostics`). Use a **base** model: instruct tuning distorts raw-text likelihoods.
+
+---
+
 ## Configuration
 
 ```python
-from m1_analyzer import Analyzer, RunConfig, ModelConfig, ExtractionConfig, StorageConfig
+from m1_analyzer import Analyzer, RunConfig, ModelConfig, ExtractionConfig, ScoringConfig, StorageConfig
 
 config = RunConfig(
     model=ModelConfig(
         model_id="Qwen/Qwen2.5-0.5B-Instruct",
         revision=None,             # pin a commit SHA for reproducibility
         device="auto",             # auto | cpu | cuda | mps
-        dtype="auto",              # auto | float32 | float16 | bfloat16
+        dtype="auto",              # auto | float32 | float16 | bfloat16 (bf16 only when native)
         trust_remote_code=False,   # executes repo code -- opt in per model
+        head="base",               # base (hidden states) | causal_lm (adds score())
     ),
     extraction=ExtractionConfig(
         layers=-1,                 # int, list, "all", "last", "middle"
@@ -99,6 +147,12 @@ config = RunConfig(
         batch_size=8,              # auto-halves on GPU OOM
         continue_on_error=True,    # record failures instead of raising
         include_tokens=False,      # save token strings with per-token output
+    ),
+    scoring=ScoringConfig(         # used by score() when head="causal_lm"
+        batch_size=64,
+        max_length_cap=512,
+        bos_policy="auto",         # prepend BOS (else EOS) so every token is predicted | none
+        logit_chunk=8,             # sequences per float32 logit block (memory knob)
     ),
     storage=StorageConfig(
         output_dir="outputs",
@@ -178,9 +232,14 @@ When a run exceeds `npy_threshold_floats` (1M by default), `values` becomes `nul
 ## Tests
 
 ```bash
-pytest -q                              # 143 tests, fully offline, a few seconds
+pytest -q                              # ~260 tests, fully offline, a few seconds
 python scripts/smoke_test.py --offline # end-to-end without the Hub
 ```
+
+The experiment analyses are tested against `m1_analyzer.testing.FakeSpanScorer`, a scorer
+that knows the gold tree, because the tiny model's word-level tokenizer cannot spell the
+proforms. The NLTK loader test is skipped until the corpus has been downloaded once
+(`python -c "import nltk; nltk.download('treebank')"`).
 
 The suite builds a tiny random GPT-2 on disk and loads it through the same
 `from_pretrained` path a real model uses, so it needs no network and cannot be broken by a

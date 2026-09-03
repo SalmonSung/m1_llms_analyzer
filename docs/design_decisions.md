@@ -32,11 +32,15 @@ type checking, and `__post_init__` validation with no extra dependency and no co
 to keep in sync with a notebook cell. Add YAML only if runs ever need to be launched from
 outside Python.
 
-### `AutoModel`, not `AutoModelForCausalLM`
-The task is hidden states, not next-token prediction. `AutoModel` gives the base
-transformer without the LM head, which is a chunk of parameters and memory (a `vocab ×
-hidden` matrix — hundreds of MB on a large-vocab model) that would never be used. If
-logits are ever needed, that is a second, explicit code path.
+### `AutoModel` by default; `AutoModelForCausalLM` as an explicit opt-in (`head`)
+Hidden-state extraction does not need the LM head, which is a `vocab × hidden` matrix —
+hundreds of MB on a large-vocab model — so `head="base"` loads `AutoModel`. The experiments
+need log-probabilities, so `ModelConfig(head="causal_lm")` loads `AutoModelForCausalLM`
+through the same token / revision / dtype / pad-token path. A causal-LM model still returns
+hidden states, so extraction works with either head; scoring works only with the causal one
+and says so (`Analyzer.for_scoring` is the shorthand). The head is validated against
+transformers' causal-LM registry at load time, so an encoder fails with a message rather
+than a missing `logits` attribute mid-run.
 
 ### Validation at construction, not at use
 Every config dataclass validates in `__post_init__`. A typo like `pooling="max"` fails on
@@ -68,10 +72,14 @@ both the forward pass and pooling. The vocabulary is **not** resized, so the mod
 embedding matrix is untouched. The substitution is logged and recorded in the manifest as
 `pad_token_substituted`.
 
-### bfloat16 preferred over float16 on capable GPUs
+### bfloat16 preferred over float16 on GPUs that run it natively
 Same speed, but fp32's exponent range. Deep residual streams in large models can produce
 activations that overflow fp16 to `inf`; bf16 does not. CPU always gets fp32 — many
-kernels have no fp16 CPU implementation and those that do are slower than fp32.
+kernels have no fp16 CPU implementation and those that do are slower than fp32. The check
+is `torch.cuda.is_bf16_supported(including_emulation=False)`: since torch 2.3 the bare
+call answers *True* on a Turing GPU (a Colab T4) because bf16 can be emulated, and emulated
+bf16 is several times slower than fp16. A T4 therefore gets fp16, and the scorer treats a
+resulting overflow as a failure with a `dtype="float32"` hint rather than a number.
 
 ### Hidden states are always cast to float32 before leaving the device
 The compute dtype is a performance choice; it should not change what a saved file
@@ -140,6 +148,100 @@ better than a plausible-looking number.
 A 128k-context model would otherwise let a single long input allocate an enormous
 activation tensor and OOM a Colab GPU instantly. The cap is a guard rail, logged when it
 bites, and raised in config when you actually want long contexts.
+
+---
+
+## Scoring (log-probabilities)
+
+### A BOS token is prepended uniformly, by hand
+The cost of a span is a difference of mean log-probabilities per *predicted* token. Without
+a start token the first word is never predicted, and tokenizers disagree about adding one:
+Llama's does, GPT-2's and Qwen's do not (they use `<|endoftext|>` as the document separator,
+so prepending it conditions on "start of document", which is what the pretraining data
+looked like). Tokenising with `add_special_tokens=False` and prepending `bos_token_id`
+(else `eos_token_id`) gives every model the same treatment and every real token a
+prediction. `bos_policy="none"` scores the text as given; the token used is recorded in the
+cost cache header.
+
+### Padding is forced to the right
+Some models (Qwen3 among them) build position ids from `arange` when none are passed, so a
+left-padded batch shifts every real token's position and changes its score. The scorer
+builds its own right-padded batch instead of trusting the tokenizer's `padding_side`.
+
+### `gather − logsumexp`, never a full `log_softmax`
+A 64-sequence batch of 40 tokens over Qwen's 152k vocabulary is 1.5 GB of float32 for
+`log_softmax` alone, which is what runs a T4 out of memory. The scorer takes the target
+logit and the log-partition per position, in float32, over small sub-chunks
+(`ScoringConfig.logit_chunk`). HF's `labels=` is not used: its loss is a batch mean, not a
+per-sequence sum.
+
+### Non-finite scores are failures, not numbers
+A float16 overflow inside the model yields `inf`/`nan` for that text. It is recorded as a
+failure with a hint, never cached, and phase A counts it, so a run with overflow is visible
+and re-runnable in fp32 rather than silently wrong.
+
+### Raw sums are cached, not costs
+`SpanCostTable` stores `(sum_logprob, n_tokens)` for the base text and each proform × span.
+Mean-per-token vs total normalisation, and the policy that reduces per-proform costs to
+one, are then phase-B choices that cost no GPU time. Mean-per-token is the default because
+a variant is shorter than the sentence it came from and totals carry that length bias.
+
+### The cost cache is JSONL, appended and fsynced
+Colab pre-empts free sessions in one to two hours; phase A on 1000 sentences takes about
+half an hour on a T4 and hours on a CPU. One line per finished sentence, flushed and
+fsynced, means a disconnect loses at most one sentence; on resume the header must match on
+model, proforms, and BOS policy (the mismatching field is named), a truncated last line is
+dropped and rescored, and an optional Drive mirror survives the wipe of `/content`.
+
+---
+
+## Experiments (Task 1b)
+
+### Base models, not instruct models
+The cost is a raw-text log-probability. A base model's log-probability *is* its fluency
+judgement. An instruct model is further trained to produce chat-formatted answers, expects
+a template it is not given, and its preference tuning is known to miscalibrate raw
+likelihoods — noise unrelated to syntax, and incomparable with the theory doc and the
+unsupervised-parsing literature, which score base LMs. The default is `Qwen/Qwen3-0.6B-Base`;
+`gpt2` reproduces the theory doc's one-sentence numbers.
+
+### The free NLTK PTB sample is the gold
+The full Penn Treebank needs an LDC licence. NLTK ships 10% of the WSJ section (3,914
+sentences) with the annotators' constituency trees, downloadable from a notebook. 3,160
+sentences survive the 5–30-word window, so N = 1000 is a seeded sample, returned in corpus
+order for reproducibility. Universal Dependencies is a documented stub: its arcs convert to
+spans under conventions of their own (no VP node, prepositions under the noun) and the
+numbers are not comparable.
+
+### Treebank conventions follow the unsupervised-parsing literature
+Traces (`-NONE-`) removed with any node they empty, recursively; punctuation removed by the
+ON-LSTM / Compound-PCFG tag list (`, . : `` '' -LRB- -RRB- # $` — `$` and `#` are currency
+tags in PTB and go with the rest); unaries collapsed by making gold a *set* of spans;
+labels dropped (substitution yields none); single words and the whole sentence excluded.
+Spans are defined over PTB tokens, so a boundary can fall inside a contraction
+(`do | n't`); the detokenised string is then slightly odd, which is accepted and noted.
+Sentences with no gold span after all this (flat trees) are excluded and counted.
+
+### Sentence-level mean F1 with a bootstrap over sentences
+The figure's whiskers are "95% bootstrap CI over sentences", which is only meaningful for a
+per-sentence statistic, so `methods[*].f1` is the mean of per-sentence F1 (percentile
+bootstrap, seeded). The corpus-level micro F1 the literature reports is in `diagnostics`,
+with the paired-bootstrap gap against each baseline, which is what the verdict uses.
+
+### Greedy induction by default, CKY as an option
+"Cheapest first, never cross" is the theory doc's procedure and the simplest to reason
+about; its known failure (an early cheap non-constituent blocking two gold spans) is part
+of what the experiment measures. `cky_induce` finds the minimum-total-cost tree over the
+same costs for comparison; the record names the inducer.
+
+### The random baseline is a recursive uniform split
+Pick a split point uniformly at random, recurse — the standard "random tree" baseline (not
+uniform over the Catalan set). K = 10 draws per sentence are averaged before the bootstrap.
+
+### The proform policy is "min over {it, there, did, then}" until Task 1a says otherwise
+Every span is scored with each proform and the cheapest wins, blind to the label. All four
+are cached, so any fixed-by-length policy over these proforms can be evaluated later from
+the cache alone.
 
 ---
 
@@ -279,5 +381,7 @@ Each of these is a real gap, listed so it is a decision rather than an oversight
 | **Long-document chunking** | Inputs longer than the context are truncated and flagged, not split-and-stitched. Sliding-window chunking plus a merge policy is a design question of its own. |
 | **Quantized loading (`bitsandbytes`, GPTQ)** | Would let bigger models fit a T4. Quantization changes hidden-state values, so it needs to be recorded in the manifest and thought about before results are compared across runs. |
 | **Multi-GPU / `device_map="auto"`** | Single-device only. Colab gives one GPU; `accelerate` sharding adds real complexity for no benefit there. |
-| **Cross-run comparison utilities** | Cosine similarity, layer-wise drift, projections. Deliberately out of scope: this repo's job is producing trustworthy, self-describing files; analysis is downstream and better done in a notebook against `load_run()`. |
+| **Cross-run comparison utilities** | Cosine similarity, layer-wise drift, projections. Deliberately out of scope for the extraction pipeline: its job is producing trustworthy, self-describing files. The experiments package is the exception, because a runbook task *is* an analysis with a fixed record schema. |
+| **Universal Dependencies gold** | `load_ud_conllu` is a stub. Subtree yields → spans, drop non-projective yields, and say so in the record's `treebank` field; not comparable with PTB numbers. |
+| **In-memory score cache** | Phase A de-duplicates variants per sentence and the JSONL is the cache; a dict of 700k texts would be memory for nothing. |
 | **Streaming / incremental writes** | A run is held in memory and written once. For a very large corpus, an append-mode sink (JSONL + a growing `.npz`) satisfying `ResultSink` would be the change. |
