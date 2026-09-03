@@ -2,7 +2,7 @@
 
 import pytest
 
-from m1_analyzer import ExtractionConfig, ModelConfig, RunConfig, StorageConfig
+from m1_analyzer import ExtractionConfig, ModelConfig, RunConfig, ScoringConfig, StorageConfig
 
 
 def test_defaults_are_valid():
@@ -59,3 +59,25 @@ def test_token_never_leaves_the_config():
     config = RunConfig(model=ModelConfig(hf_token="hf_supersecret"))
     assert config.to_dict()["model"]["hf_token"] is None
     assert "hf_supersecret" not in str(config.to_dict())
+
+
+def test_model_head_is_validated():
+    assert ModelConfig(head="causal_lm").head == "causal_lm"
+    assert RunConfig().model.head == "base"
+    with pytest.raises(ValueError, match="head must be one of"):
+        ModelConfig(head="seq2seq")
+
+
+@pytest.mark.parametrize("bad", [
+    dict(batch_size=0), dict(max_length=0), dict(max_length_cap=0),
+    dict(bos_policy="eos"), dict(logit_chunk=0),
+])
+def test_scoring_config_rejects_bad_values(bad):
+    with pytest.raises(ValueError):
+        ScoringConfig(**bad)
+
+
+def test_scoring_config_defaults_and_fingerprint_sensitivity():
+    assert ScoringConfig().bos_policy == "auto"
+    assert RunConfig().fingerprint() != RunConfig(scoring=ScoringConfig(batch_size=8)).fingerprint()
+    assert RunConfig().fingerprint() != RunConfig(model=ModelConfig(head="causal_lm")).fingerprint()

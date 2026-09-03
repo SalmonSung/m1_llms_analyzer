@@ -16,7 +16,7 @@ Design points worth knowing before editing:
 from __future__ import annotations
 
 import time
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -28,6 +28,10 @@ from ..domain.records import (
     LayerState,
     make_item_id,
 )
+from ..utils.batching import OOM_ERRORS as _OOM_ERRORS
+from ..utils.batching import chunk as _chunk
+from ..utils.batching import empty_cuda_cache
+from ..utils.batching import maybe_progress as _maybe_progress
 from ..utils.logging import get_logger
 from ..utils.pooling import apply_pooling, unpad_sequence
 from .interfaces import ModelProvider
@@ -327,42 +331,4 @@ class InferenceService:
 
     @staticmethod
     def _empty_cache() -> None:
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:  # pragma: no cover
-            pass
-
-
-def _chunk(items: list[int], size: int) -> Iterable[list[int]]:
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
-
-
-def _maybe_progress(items: list, enabled: bool):
-    if not enabled:
-        return items
-    try:
-        from tqdm.auto import tqdm
-
-        return tqdm(items, desc="batches", unit="batch")
-    except Exception:  # tqdm is a soft dependency; never block a run on it
-        return items
-
-
-def _oom_errors() -> tuple:
-    """CUDA OOM classes, tolerant of torch versions and torch being absent."""
-    errors: list[type] = []
-    try:
-        import torch
-
-        errors.append(torch.cuda.OutOfMemoryError)
-    except Exception:  # pragma: no cover
-        pass
-    errors.append(MemoryError)
-    return tuple(errors)
-
-
-_OOM_ERRORS = _oom_errors()
+        empty_cuda_cache()

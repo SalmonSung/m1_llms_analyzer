@@ -5,7 +5,11 @@
 # reinstall and can break CUDA. The notebook installs with
 # `--upgrade-strategy only-if-needed` so an existing satisfying torch is kept.
 torch>=2.0
-transformers>=4.40
+transformers>=4.51        # Qwen3 support
 numpy>=1.24
 huggingface_hub>=0.23
 tqdm>=4.65
+# Experiments (notebooks/experiment_1b.ipynb): treebank, figures, bootstrap stats.
+nltk>=3.8
+matplotlib>=3.7
+scipy>=1.10

@@ -78,3 +78,67 @@ def build_tiny_local_model(
     model.save_pretrained(directory)
     tokenizer.save_pretrained(directory)
     return str(directory)
+
+
+# ------------------------------------------------------------- fake scorer
+
+#: Costs the fake scorer assigns to a span by its relation to the gold tree.
+FAKE_COST_GOLD = 0.3
+FAKE_COST_NEUTRAL = 1.0
+FAKE_COST_CROSSING = 2.0
+
+
+class FakeSpanScorer:
+    """A `SequenceScorer` that knows the answer: gold spans are cheap, crossing
+    spans dear, everything else in between, with a little seeded noise.
+
+    The tiny local model cannot test replacement policies -- its word-level
+    vocabulary maps ``it``/``there``/``did``/``then`` all to ``[UNK]`` -- so the
+    experiment analyses are tested against this fake instead. It reproduces
+    the *shape* of a passing Task 1b run (substitution beats right-branching),
+    which is what the plumbing tests need; it says nothing about any model.
+    """
+
+    def __init__(self, sentences, proforms=("it", "there", "did", "then"), *, noise=0.15, seed=1,
+                 base_per_token=-3.0):
+        import numpy as np
+
+        from .domain.records import make_item_id
+        from .experiments.proforms import substitute
+        from .experiments.spans import crosses, enumerate_spans
+        from .experiments.treebank import detokenize_ptb
+
+        self._make_id = make_item_id
+        rng = np.random.default_rng(seed)
+        self.table: dict[str, tuple[float, int]] = {}
+        self.calls = 0
+        for s in sentences:
+            self.table[s.text] = (base_per_token * s.n, s.n)
+            for (i, j) in enumerate_spans(s.n):
+                if (i, j) in s.gold_spans:
+                    cost = FAKE_COST_GOLD
+                elif any(crosses((i, j), g) for g in s.gold_spans):
+                    cost = FAKE_COST_CROSSING
+                else:
+                    cost = FAKE_COST_NEUTRAL
+                for k, proform in enumerate(proforms):
+                    text = detokenize_ptb(substitute(s.words, i, j, proform))
+                    n = s.n - (j - i)
+                    jitter = float(rng.normal(0, noise)) + 0.05 * k
+                    self.table.setdefault(text, ((base_per_token - cost - jitter) * n, n))
+
+    def score(self, texts, **overrides):
+        from .domain.records import ExtractionFailure, ScoreResult, SentenceScore
+
+        self.calls += 1
+        scores, failures = [], []
+        for index, text in enumerate(texts):
+            if text not in self.table:
+                failures.append(ExtractionFailure(
+                    id=self._make_id(text), text_preview=text, error_type="KeyError",
+                    error="fake scorer has no entry for this text", index=index,
+                ))
+                continue
+            total, n = self.table[text]
+            scores.append(SentenceScore(id=self._make_id(text), text=text, n_tokens=n, sum_logprob=total))
+        return ScoreResult(scores=scores, failures=failures)

@@ -10,14 +10,17 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "torch>=2.0",
-    "transformers>=4.40",
+    "transformers>=4.51",
     "numpy>=1.24",
     "huggingface_hub>=0.23",
     "tqdm>=4.65",
+    "nltk>=3.8",
+    "matplotlib>=3.7",
+    "scipy>=1.10",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "nbformat>=5.9", "pillow>=9.0"]
 
 [project.scripts]
 m1-extract = "m1_analyzer.cli:main"

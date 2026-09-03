@@ -1,4 +1,4 @@
-"""The Colab entrypoint notebook must be valid and correctly line-separated.
+"""The Colab notebooks must be valid and correctly line-separated.
 
 This exists because of a real bug: the notebook was generated with `source` arrays
 whose elements had no trailing newline. `nbformat` still validated it and the JSON
@@ -18,13 +18,17 @@ from pathlib import Path
 
 import pytest
 
-NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks" / "colab_entrypoint.ipynb"
+NOTEBOOKS_DIR = Path(__file__).resolve().parents[1] / "notebooks"
+NOTEBOOKS = ("colab_entrypoint.ipynb", "experiment_1b.ipynb")
+NOTEBOOK = NOTEBOOKS_DIR / NOTEBOOKS[0]
 
 
-@pytest.fixture(scope="module")
-def notebook() -> dict:
-    assert NOTEBOOK.exists(), f"{NOTEBOOK} is the Colab entrypoint and must exist."
-    return json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+@pytest.fixture(scope="module", params=NOTEBOOKS)
+def notebook(request) -> dict:
+    """Each check runs against every notebook; both must clone via the same bootstrap."""
+    path = NOTEBOOKS_DIR / request.param
+    assert path.exists(), f"{path} is a Colab notebook and must exist."
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _source(cell: dict) -> str:

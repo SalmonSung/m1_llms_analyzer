@@ -112,6 +112,52 @@ class BatchResult:
 
 
 @dataclass
+class SentenceScore:
+    """Log-probability of one text under a causal language model.
+
+    ``n_tokens`` counts *predicted* tokens: every token of the text when a BOS
+    token was prepended, else every token but the first. ``mean_logprob`` is the
+    per-predicted-token average (nats); the negative of it is the "fluency" of
+    the teaching doc, and a difference of two means is a substitution cost.
+    """
+
+    id: str
+    text: str
+    n_tokens: int
+    sum_logprob: float
+    #: Per-token log-probabilities, only when asked for (Tasks that need the
+    #: probability of one specific word, e.g. an agreement verb).
+    token_logprobs: np.ndarray | None = None
+
+    @property
+    def mean_logprob(self) -> float:
+        return self.sum_logprob / self.n_tokens if self.n_tokens else float("nan")
+
+
+@dataclass
+class ScoreResult:
+    """Scores and failures from one ``score()`` call, in input order."""
+
+    scores: list[SentenceScore] = field(default_factory=list)
+    failures: list[ExtractionFailure] = field(default_factory=list)
+    elapsed_seconds: float = 0.0
+    scoring: dict[str, Any] | None = None
+
+    def __len__(self) -> int:
+        return len(self.scores)
+
+    def __iter__(self):
+        return iter(self.scores)
+
+    def __getitem__(self, i: int) -> SentenceScore:
+        return self.scores[i]
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
+
+
+@dataclass
 class RunManifest:
     """Provenance stamped into every output file.
 

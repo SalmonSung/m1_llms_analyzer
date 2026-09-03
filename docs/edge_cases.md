@@ -40,13 +40,28 @@ lives in `design_decisions.md`; this file is the checklist.
 | 29 | **Missing sidecar after moving files** | Copying only the `.json` gives a `KeyError` or silent `None` values. | `load_run()` raises a message saying to keep the `.json` and `.npz` together. | `storage_service.load_run` |
 | 31 | **Notebook `source` lines without trailing newlines** | `nbformat` validates and the JSON parses, but Colab concatenates `source` elements verbatim — every cell renders as one enormous line and no code cell runs. | Enforced by a test that checks each element (bar the last) ends in `\n`, and that code cells compile when joined with `""`, the way a reader joins them. | `tests/test_notebook.py` |
 | 34 | **`pytest` vs `python -m pytest`** | A test importing `tests.conftest` collects fine under `python -m pytest` (which puts the cwd on `sys.path`) and fails under the `pytest` console script — the form the README documents. | Shared constants moved to `m1_analyzer.testing`; a guard fails if any test module imports `tests.*`. Both invocations are exercised. | `tests/test_imports.py` |
+| 35 | **Emulated bfloat16 on a T4** | `torch.cuda.is_bf16_supported()` says True on Turing since torch 2.3 (emulation), and emulated bf16 is several times slower than fp16. | Checked with `including_emulation=False`; a T4 gets float16. | `utils/device.supports_native_bf16` |
+| 36 | **Logits out of memory** | `log_softmax` over a 150k vocabulary for a 64×40 batch is >1 GB of float32. | Target logit minus `logsumexp`, in float32, over sub-chunks of `logit_chunk` sequences. | `scoring_service._forward` |
+| 37 | **Left padding shifts positions** | Some models derive position ids from `arange`; left padding changes every real token's score. | The scorer builds its own right-padded batch. | `scoring_service._forward` |
+| 38 | **First token never predicted** | Without a start token the first word has no prediction, and tokenizers disagree about adding one. | BOS (else EOS) prepended by hand after `add_special_tokens=False`; recorded in the cache header. | `scoring_service._bos_id` |
+| 39 | **float16 overflow in a score** | `inf`/`nan` would become a cost and rank a span first or last. | Non-finite sums are failures with a `dtype="float32"` hint, never cached. | `scoring_service.score`; `test_scoring.py::test_non_finite_scores_become_failures` |
+| 40 | **Colab pre-empts phase A** | An hour of scoring lost with `/content`. | JSONL cache appended and fsynced per sentence; resume skips finished sentences; optional Drive mirror. | `span_costs.compute_span_costs` |
+| 41 | **Cache from another model or proform set** | Costs from two models silently mixed. | Header compared on resume; the mismatching field is named. | `span_costs._check_header` |
+| 42 | **Truncated last cache line** | A write interrupted mid-line makes the file unreadable. | Only the last line may be broken; it is dropped, the file rewritten, the sentence rescored. | `span_costs._read_jsonl` |
+| 43 | **Trace-only nodes in the treebank** | `(SBAR (-NONE- *T*-1))` has no words; a naive yield gives an empty or wrong span, and a parent emptied by its children is missed. | Yields computed bottom-up over surviving words; a node with fewer than two words contributes no span, however deep. | `treebank.gold_spans_from_tree` |
+| 44 | **Flat sentences with no gold** | Recall is undefined; a per-sentence bootstrap cannot include them. | Excluded from the analysis and counted in the record's notes. | `task_1b.analyse_1b` |
+| 45 | **Span boundary inside a contraction** | Spans are over PTB tokens, so "do \| n't" can be split; the detokenised variant is odd. | Accepted and documented: gold is defined over the same tokens. | `treebank.detokenize_ptb` |
+| 46 | **Tied costs in greedy induction** | fp16 costs tie; dict order would decide the tree. | Stable sort on `(cost, length, start)`. | `spans.rank_spans` |
+| 47 | **Tiny test model cannot spell the proforms** | `it`/`there`/`did`/`then` all tokenise to `[UNK]`, so policy tests on it would be vacuous. | `FakeSpanScorer` (knows the gold tree) drives the analysis tests; the tiny model tests scoring plumbing only. | `m1_analyzer.testing.FakeSpanScorer` |
 | 30 | **Padding rows in per-token output** | A `[seq_len, hidden]` matrix that includes PAD rows makes token counts wrong downstream. | `unpad_sequence` trims each item to its real tokens; one row per real token, asserted in tests. | `utils/pooling.unpad_sequence` |
 
 ## Known limits (not handled — by choice)
 
 | Limit | Consequence | See |
 |---|---|---|
-| Instruct models get **raw text**, not a chat template | Hidden states differ from what the model sees in chat use. | `design_decisions.md` → "Deliberately not built yet" |
+| Instruct models get **raw text**, not a chat template | Hidden states differ from what the model sees in chat use; log-probabilities from instruct models are distorted, so experiments use base models. | `design_decisions.md` → "Deliberately not built yet", "Base models, not instruct models" |
+| No Universal Dependencies gold | Only the NLTK PTB sample is wired up; UD needs its own arc-to-span conventions. | `treebank.load_ud_conllu` |
+| No in-notebook re-run of the full Task 1b on CPU | Phase A on 1000 sentences is hours without a GPU; the smoke test and the one-sentence walkthrough are the CPU-sized checks. | `notebooks/experiment_1b.ipynb` |
 | No long-document chunking | Text beyond the context is truncated (and flagged), never split and stitched. | same |
 | No attention weights | Only hidden states are captured. | same |
 | No layer *aggregation* | You can select layers 8–16, but combining them into one vector is downstream work. | same |

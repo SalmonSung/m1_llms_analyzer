@@ -5,8 +5,11 @@ runtime, a T4, and an A100 without edits:
 
 * CPU + float16 is a trap -- many kernels have no fp16 CPU implementation and the
   ones that do are slower than fp32. CPU therefore always gets float32.
-* bfloat16 is preferred on GPUs that support it (Ampere+): same speed as fp16
-  with fp32's exponent range, so hidden states cannot overflow to inf.
+* bfloat16 is preferred on GPUs that support it *natively* (Ampere+): same
+  speed as fp16 with fp32's exponent range, so hidden states cannot overflow to
+  inf. Pre-Ampere GPUs (a Colab T4 is Turing) report bf16 as "supported" via
+  emulation in recent torch versions, which runs several times slower than
+  fp16 -- so support is checked without emulation and a T4 gets float16.
 * Hidden states are always cast to float32 before leaving the GPU, so the saved
   numbers do not depend on the compute dtype's precision.
 """
@@ -55,12 +58,27 @@ def resolve_dtype(device: str, preference: str = "auto") -> Any:
         return dtype
 
     if device == "cuda":
-        if torch.cuda.is_bf16_supported():
+        if supports_native_bf16():
             return torch.bfloat16
         return torch.float16
     if device == "mps":
         return torch.float32
     return torch.float32
+
+
+def supports_native_bf16() -> bool:
+    """True only when the GPU runs bfloat16 in hardware, never via emulation."""
+    import torch
+
+    if not torch.cuda.is_available():
+        return False
+    try:
+        return bool(torch.cuda.is_bf16_supported(including_emulation=False))
+    except TypeError:
+        # torch < 2.3 has no `including_emulation` argument and no emulation
+        # either, but check the compute capability to be safe (Ampere is 8.x).
+        major, _ = torch.cuda.get_device_capability(0)
+        return major >= 8
 
 
 def describe_device(device: str) -> dict:

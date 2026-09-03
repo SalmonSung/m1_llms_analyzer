@@ -25,5 +25,6 @@ outputs/
 *.npy
 *.npz
 
-# HF cache if it lands in-repo
+# HF / NLTK caches if they land in-repo
 .cache/
+nltk_data/

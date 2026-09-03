@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Sequence, runtime_checkable
 
-from ..domain.records import BatchResult, ExtractionRecord, RunManifest, WrittenPaths
+from ..domain.records import BatchResult, ExtractionRecord, RunManifest, ScoreResult, WrittenPaths
 
 
 @runtime_checkable
@@ -50,6 +50,17 @@ class InferenceEngine(Protocol):
     def invoke(self, text: str, **overrides: Any) -> ExtractionRecord: ...
 
     def batch(self, texts: Sequence[str], **overrides: Any) -> BatchResult: ...
+
+
+@runtime_checkable
+class SequenceScorer(Protocol):
+    """Turns text into log-probabilities (needs a model loaded with the LM head).
+
+    Experiments depend on this seam only, so a dict-backed fake can drive the
+    whole analysis in a test, and a remote scorer could replace the local one.
+    """
+
+    def score(self, texts: Sequence[str], **overrides: Any) -> ScoreResult: ...
 
 
 @runtime_checkable
