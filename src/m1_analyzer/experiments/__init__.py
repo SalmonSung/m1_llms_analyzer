@@ -24,13 +24,17 @@ from .spans import (
 from .stats import bootstrap_ci, paired_bootstrap_diff, trapezoid_area
 from .task_1b import METHODS, analyse_1b, evaluate_sentence, run_task_1b, validate_record, verdict
 from .treebank import (
+    CONVENTIONS,
     PTB_NLTK_NAME,
     PUNCT_TAGS,
     TreebankSentence,
     detokenize_ptb,
     gold_spans_from_tree,
     hand_examples,
+    load_gold_jsonl,
     load_ptb_nltk,
+    ptb_tree_strings,
+    save_gold_jsonl,
     theory_example,
 )
 
@@ -42,6 +46,7 @@ __all__ = [
     "left_branching", "random_binary", "rank_curve", "right_branching", "spans_to_brackets",
     "bootstrap_ci", "paired_bootstrap_diff", "trapezoid_area",
     "METHODS", "analyse_1b", "evaluate_sentence", "run_task_1b", "validate_record", "verdict",
-    "PTB_NLTK_NAME", "PUNCT_TAGS", "TreebankSentence", "detokenize_ptb", "gold_spans_from_tree",
-    "hand_examples", "load_ptb_nltk", "theory_example",
+    "CONVENTIONS", "PTB_NLTK_NAME", "PUNCT_TAGS", "TreebankSentence", "detokenize_ptb",
+    "gold_spans_from_tree", "hand_examples", "load_gold_jsonl", "load_ptb_nltk",
+    "ptb_tree_strings", "save_gold_jsonl", "theory_example",
 ]
