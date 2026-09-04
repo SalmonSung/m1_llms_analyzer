@@ -346,6 +346,9 @@ class ModelService:
         Takes the model's own context length unless the caller asked for less,
         then applies `cap` so a 128k-context model cannot be handed a sequence
         that would exhaust GPU memory by accident.
+
+        Both `ExtractionConfig` and `ScoringConfig` carry a `max_length_cap` and
+        call this, so the log line names the setting, not a config class.
         """
         model_max = self._model_context_length()
         chosen = model_max if requested is None else min(requested, model_max)
@@ -355,7 +358,7 @@ class ModelService:
                 requested, model_max, model_max,
             )
         if chosen > cap:
-            log.info("Capping max_length %d -> %d (ExtractionConfig.max_length_cap).", chosen, cap)
+            log.info("Capping max_length %d -> %d (max_length_cap).", chosen, cap)
             chosen = cap
         return max(1, chosen)
 

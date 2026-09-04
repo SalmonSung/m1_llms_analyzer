@@ -113,7 +113,10 @@ m1_llms_analyzer/
 │   │   ├── treebank.py            TreebankSentence + gold spans from trees (traces and
 │   │   │                          punctuation removed, unaries collapsed), PTB detokeniser,
 │   │   │                          load_ptb_nltk (the free NLTK WSJ sample), hand examples
-│   │   │                          incl. the theory doc's sentence. UD is a documented stub.
+│   │   │                          incl. the theory doc's sentence, and save/load_gold_jsonl
+│   │   │                          (+ ptb_tree_strings) which export the answer key so a cost
+│   │   │                          cache can be re-analysed with no corpus installed.
+│   │   │                          UD is a documented stub.
 │   │   ├── span_costs.py          Phase A: SpanCostTable (raw sum/count per proform x span,
 │   │   │                          cost derived on read), compute_span_costs with a resumable
 │   │   │                          JSONL cache (header check, fsync, truncated-line repair,
@@ -221,6 +224,7 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
         │
         ├──▶ experiments.treebank.load_ptb_nltk(n, min_len, max_len, seed)
         │        NLTK PTB sample -> TreebankSentence(words, text, gold_spans)
+        │     ──▶ outputs/task_1b/gold_<treebank>_<seed>.jsonl   (save_gold_jsonl)
         │
         ├──▶ PHASE A (GPU)  experiments.span_costs.compute_span_costs(analyzer, sentences, policy)
         │        every span x proform -> substitute -> detokenise -> score
@@ -235,7 +239,9 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
 ```
 
 Phase B is seconds, so a different inducer, normalisation, or proform subset is re-run
-from the cache without the GPU. The same cache is Task 1a's raw data (every span is a
+from the cache without the GPU. The cost cache names sentences by id but holds no gold, so
+the gold export travels with it: `load_gold_jsonl` + `load_span_costs` reconstruct every
+phase-B input on a machine with no treebank installed. The same cache is Task 1a's raw data (every span is a
 "box" if it is gold, a "straddle" if it crosses gold).
 
 ## Layer indexing convention

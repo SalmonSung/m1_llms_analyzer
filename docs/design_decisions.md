@@ -238,6 +238,14 @@ same costs for comparison; the record names the inducer.
 Pick a split point uniformly at random, recurse — the standard "random tree" baseline (not
 uniform over the Catalan set). K = 10 draws per sentence are averaged before the bootstrap.
 
+### The gold is exported next to the cost cache
+The cache identifies sentences by `fileid:index` and stores no answer key, so re-analysing it
+elsewhere would need NLTK, the corpus, and byte-identical conventions. `save_gold_jsonl` writes
+the words, text, spans and the conventions that produced them, and optionally each original
+bracketed parse. The two JSONL files together are a self-contained record: `load_gold_jsonl`
+needs no NLTK at all, and the stored trees allow gold to be re-derived under *different*
+conventions (keeping punctuation, say) without the corpus.
+
 ### The proform policy is "min over {it, there, did, then}" until Task 1a says otherwise
 Every span is scored with each proform and the cheapest wins, blind to the label. All four
 are cached, so any fixed-by-length policy over these proforms can be evaluated later from

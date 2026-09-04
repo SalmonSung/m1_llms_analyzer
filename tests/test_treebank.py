@@ -86,3 +86,92 @@ def test_load_ptb_nltk_is_seeded_filtered_and_in_corpus_order():
     assert all(s.id.startswith("wsj_") for s in a)
     in_order = sorted(a, key=lambda s: (s.info["fileid"], s.info["index"]))
     assert [s.id for s in a] == [s.id for s in in_order]
+
+
+# ------------------------------------------------------------- gold export
+
+
+def test_gold_export_round_trips_without_nltk(tmp_path):
+    """The export must rebuild the same answer key on a machine with no corpus."""
+    from m1_analyzer.experiments.treebank import (
+        CONVENTIONS,
+        GOLD_SCHEMA,
+        load_gold_jsonl,
+        save_gold_jsonl,
+    )
+
+    original = hand_examples()
+    path = tmp_path / "gold.jsonl"
+    save_gold_jsonl(original, path, provenance={"treebank": "hand", "seed": 7})
+
+    header, reloaded = load_gold_jsonl(path)
+    assert header["schema"] == GOLD_SCHEMA and header["n_sentences"] == len(original)
+    assert header["treebank"] == "hand" and header["seed"] == 7
+    assert header["conventions"] == CONVENTIONS
+    assert sorted(header["punct_tags"]) == sorted(PUNCT_TAGS)
+    assert header["includes_trees"] is False
+
+    assert [s.id for s in reloaded] == [s.id for s in original]
+    for got, want in zip(reloaded, original):
+        assert got.words == want.words
+        assert got.text == want.text
+        assert got.gold_spans == want.gold_spans
+        assert got.n == want.n
+
+
+def test_gold_export_is_jsonl_with_one_line_per_sentence(tmp_path):
+    import json
+
+    from m1_analyzer.experiments.treebank import save_gold_jsonl
+
+    path = tmp_path / "gold.jsonl"
+    save_gold_jsonl(hand_examples(), path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 + len(hand_examples())
+    assert json.loads(lines[0])["kind"] == "header"
+    row = json.loads(lines[1])
+    assert row["kind"] == "sentence" and row["id"] == "theory-doc"
+    assert row["gold_spans"] == [list(sp) for sp in sorted(theory_example().gold_spans)]
+    assert "tree" not in row
+
+
+def test_gold_export_carries_trees_when_given(tmp_path):
+    from m1_analyzer.experiments.treebank import load_gold_jsonl, save_gold_jsonl
+
+    path = tmp_path / "gold.jsonl"
+    sentences = hand_examples()
+    trees = {sentences[0].id: "(S (NP (DT the) (NN dog)) (VP (VBD ran)))"}
+    save_gold_jsonl(sentences, path, trees=trees)
+    header, reloaded = load_gold_jsonl(path)
+    assert header["includes_trees"] is True
+    assert reloaded[0].info["tree"] == trees[sentences[0].id]
+    assert "tree" not in reloaded[1].info
+
+
+def test_load_gold_jsonl_rejects_a_headerless_file(tmp_path):
+    from m1_analyzer.experiments.treebank import load_gold_jsonl
+
+    path = tmp_path / "nope.jsonl"
+    path.write_text('{"kind": "sentence", "id": "x", "words": ["a", "b"], "gold_spans": []}\n')
+    with pytest.raises(ValueError, match="no header line"):
+        load_gold_jsonl(path)
+
+
+def test_ptb_tree_strings_skips_sentences_with_no_fileid():
+    from m1_analyzer.experiments.treebank import ptb_tree_strings
+
+    assert ptb_tree_strings(hand_examples(), download=False) == {}
+
+
+@pytest.mark.skipif(not _treebank_available(), reason="NLTK treebank corpus not downloaded")
+def test_ptb_tree_strings_returns_the_original_parse():
+    from m1_analyzer.experiments.treebank import ptb_tree_strings
+
+    sentences = load_ptb_nltk(5, min_len=5, max_len=15, seed=1, download=False)
+    trees = ptb_tree_strings(sentences, download=False)
+    assert set(trees) == {s.id for s in sentences}
+    for s in sentences:
+        text = trees[s.id]
+        assert text.startswith("(") and "\n" not in text
+        # every surviving word appears in its own tree
+        assert all(word in text for word in s.words)

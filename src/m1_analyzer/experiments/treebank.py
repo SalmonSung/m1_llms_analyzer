@@ -26,18 +26,34 @@ own; `load_ud_conllu` is a documented stub until a task needs it.
 
 from __future__ import annotations
 
+import json
+import os
 import random
 import re
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
 
+from ..utils.logging import get_logger
 from .spans import Span, is_trivial
+
+log = get_logger("treebank")
 
 #: POS tags removed before scoring (the ON-LSTM / Kim et al. evaluation convention).
 PUNCT_TAGS: frozenset[str] = frozenset({",", ".", ":", "``", "''", "-LRB-", "-RRB-", "#", "$"})
 TRACE_TAG = "-NONE-"
 
 PTB_NLTK_NAME = "PTB (NLTK WSJ 10% sample)"
+
+#: Version of the gold-export format written by `save_gold_jsonl`.
+GOLD_SCHEMA = 1
+
+#: What the gold spans mean, copied into every export so a file explains itself.
+CONVENTIONS = (
+    "spans are (first_word, last_word) inclusive, 0-based, over `words`; traces (-NONE-) and "
+    "punctuation tags removed with any node they empty; unaries collapsed (gold is a set); "
+    "labels dropped (unlabelled scoring); single words and the whole sentence excluded"
+)
 
 
 @dataclass
@@ -196,6 +212,114 @@ def load_ud_conllu(path: str, **kwargs):  # pragma: no cover - documented stub
     Implement when a task needs it, and put the conversion in the record.
     """
     raise NotImplementedError("UD support is planned; see the docstring for the conversion rules.")
+
+
+# --------------------------------------------------------------- gold export
+
+
+def ptb_tree_strings(sentences: Sequence[TreebankSentence], download: bool = True) -> dict[str, str]:
+    """Raw bracketed tree per sentence id, for sentences loaded from the NLTK PTB.
+
+    Each file is parsed once, not once per sentence. Sentences without a
+    ``fileid`` in their ``info`` (hand examples, other corpora) are skipped.
+    """
+    wanted: dict[str, list[TreebankSentence]] = {}
+    for sentence in sentences:
+        fileid = sentence.info.get("fileid")
+        if fileid is not None:
+            wanted.setdefault(fileid, []).append(sentence)
+    if not wanted:
+        return {}
+    ensure_nltk_treebank(download)
+    from nltk.corpus import treebank
+
+    out: dict[str, str] = {}
+    for fileid, group in wanted.items():
+        parsed = treebank.parsed_sents(fileid)
+        for sentence in group:
+            index = sentence.info.get("index")
+            if index is not None and index < len(parsed):
+                out[sentence.id] = parsed[index].pformat(margin=1_000_000)
+    return out
+
+
+def save_gold_jsonl(
+    sentences: Sequence[TreebankSentence],
+    path: str | os.PathLike,
+    *,
+    provenance: Mapping[str, Any] | None = None,
+    trees: Mapping[str, str] | None = None,
+) -> str:
+    """Write the answer key as JSONL: a header, then one line per sentence.
+
+    This is what makes a span-cost cache re-analysable somewhere else. The cache
+    identifies sentences by id but carries no gold, and rebuilding gold needs
+    NLTK, the corpus, and the same conventions. Exporting it pairs the two files
+    into a self-contained record of the run. Pass `trees` (from
+    `ptb_tree_strings`) to include the original bracketed parse, so gold can be
+    re-derived under different conventions without the corpus.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = {
+        "kind": "header",
+        "schema": GOLD_SCHEMA,
+        "n_sentences": len(sentences),
+        "conventions": CONVENTIONS,
+        "punct_tags": sorted(PUNCT_TAGS),
+        "trace_tag": TRACE_TAG,
+        "includes_trees": bool(trees),
+        **(provenance or {}),
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(header) + "\n")
+        for sentence in sentences:
+            row: dict[str, Any] = {
+                "kind": "sentence",
+                "id": sentence.id,
+                "n": sentence.n,
+                "words": list(sentence.words),
+                "text": sentence.text,
+                "gold_spans": [list(sp) for sp in sorted(sentence.gold_spans)],
+                "source": sentence.source,
+                "info": sentence.info,
+            }
+            if trees and sentence.id in trees:
+                row["tree"] = trees[sentence.id]
+            fh.write(json.dumps(row) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    log.info("Wrote %d gold sentence(s) to %s", len(sentences), path)
+    return str(path)
+
+
+def load_gold_jsonl(path: str | os.PathLike) -> tuple[dict[str, Any], list[TreebankSentence]]:
+    """Read a gold export back: ``(header, sentences)``. Needs no NLTK."""
+    header: dict[str, Any] | None = None
+    sentences: list[TreebankSentence] = []
+    with Path(path).open("r", encoding="utf-8") as fh:
+        for number, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            if obj.get("kind") == "header":
+                header = obj
+                continue
+            sentences.append(
+                TreebankSentence(
+                    id=obj["id"],
+                    words=list(obj["words"]),
+                    gold_spans={tuple(sp) for sp in obj["gold_spans"]},
+                    source=obj.get("source", "unknown"),
+                    text=obj.get("text"),
+                    info=dict(obj.get("info", {}), **({"tree": obj["tree"]} if "tree" in obj else {})),
+                )
+            )
+    if header is None:
+        raise ValueError(f"{path} has no header line; it is not a gold export.")
+    return header, sentences
 
 
 # ------------------------------------------------------------- hand examples
