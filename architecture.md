@@ -229,7 +229,7 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
         ├──▶ PHASE A (GPU)  experiments.span_costs.compute_span_costs(analyzer, sentences, policy)
         │        every span x proform -> substitute -> detokenise -> score
         │        raw (sum_logprob, n_tokens) per variant -> SpanCostTable
-        │     ──▶ outputs/task_1b/span_costs_<model>.jsonl   (append, fsync, resume)
+        │     ──▶ outputs/task_1b/span_costs_<model>_<policy>.jsonl   (append, fsync, resume)
         │
         └──▶ PHASE B (CPU)  experiments.task_1b.analyse_1b(tables, sentences, policy, inducer)
                  cost(i, j) = policy.choose({p: mean_lp(x) - mean_lp(x'_p)})
