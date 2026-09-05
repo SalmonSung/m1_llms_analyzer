@@ -283,13 +283,14 @@ def run_task_1b(
     treebank: str | None = None,
     notes: str = "",
     show_progress: bool = True,
+    trees: Mapping[str, str] | None = None,
     **score_kwargs: Any,
 ) -> tuple[dict[str, Any], list[SpanCostTable]]:
     """Phase A then phase B in one call; returns ``(record, tables)``."""
     policy = policy or MinOverSet()
     tables = compute_span_costs(
         scorer, sentences, policy, cache_path=cache_path, provenance=provenance,
-        show_progress=show_progress, **score_kwargs,
+        show_progress=show_progress, trees=trees, **score_kwargs,
     )
     record = analyse_1b(
         tables, sentences, policy=policy, inducer=inducer, normalisation=normalisation,

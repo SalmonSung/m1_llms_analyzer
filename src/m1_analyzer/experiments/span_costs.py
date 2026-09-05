@@ -10,6 +10,11 @@ The cache is JSONL, one line per finished sentence after a header line, written
 with ``flush + fsync``. Colab pre-empts free sessions; a re-run with the same
 cache path skips finished sentences and refuses (naming the field) if the
 header disagrees on model, proforms, or BOS policy.
+
+Each sentence row also carries the answer key (gold spans, source, provenance
+and, when given, the original bracketed tree), so one file is a complete record
+of the run: `load_span_costs_with_gold` rebuilds both the tables and the
+sentences anywhere, with no treebank installed.
 """
 
 from __future__ import annotations
@@ -19,17 +24,25 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from ..utils.batching import maybe_progress
 from ..utils.logging import get_logger
 from .proforms import ReplacementPolicy, substitute
 from .spans import Span, enumerate_spans
-from .treebank import TreebankSentence, detokenize_ptb
+from .treebank import (
+    TreebankSentence,
+    detokenize_ptb,
+    gold_header_fields,
+    sentence_from_json,
+    sentence_to_json,
+)
 
 log = get_logger("span_costs")
 
-SCHEMA = 1
+SCHEMA = 2
+#: Header fields that may legitimately differ between the writer and a resumer.
+_UNCHECKED_HEADER_KEYS = frozenset({"kind", "includes_trees"})
 NORMALISATIONS = ("mean", "sum")
 
 
@@ -138,8 +151,31 @@ def load_span_costs(path: str | os.PathLike) -> tuple[dict, list[SpanCostTable]]
     return header, [SpanCostTable.from_json(r) for r in rows]
 
 
+def load_span_costs_with_gold(
+    path: str | os.PathLike,
+) -> tuple[dict, list[SpanCostTable], list[TreebankSentence]]:
+    """Read a cache that embeds its answer key: ``(header, tables, sentences)``.
+
+    Tables and sentences are index-aligned. Needs no NLTK: this is everything
+    phase B (`analyse_1b`) takes.
+    """
+    header, rows, _ = _read_jsonl(Path(path))
+    if header is None:
+        raise ValueError(f"{path} has no header line; it is not a span-cost cache.")
+    missing = [r.get("id", "?") for r in rows if "gold_spans" not in r]
+    if missing:
+        raise ValueError(
+            f"{path}: {len(missing)} row(s) carry no gold spans (first: {missing[0]!r}). The cache "
+            "was written before the answer key was embedded (schema < 2); pair it with its "
+            "gold_*.jsonl via load_gold_jsonl instead."
+        )
+    return header, [SpanCostTable.from_json(r) for r in rows], [sentence_from_json(r) for r in rows]
+
+
 def _check_header(existing: dict, wanted: dict, path: Path) -> None:
     for key, value in wanted.items():
+        if key in _UNCHECKED_HEADER_KEYS:
+            continue
         if key in existing and existing[key] != value:
             raise ValueError(
                 f"{path} was written for {key}={existing[key]!r}, but this run has {key}={value!r}. "
@@ -166,6 +202,7 @@ def compute_span_costs(
     show_progress: bool = True,
     mirror_path: str | os.PathLike | None = None,
     mirror_every: int = 25,
+    trees: Mapping[str, str] | None = None,
     **score_kwargs: Any,
 ) -> list[SpanCostTable]:
     """Score every (span, proform) variant of every sentence; cache and resume.
@@ -173,12 +210,15 @@ def compute_span_costs(
     `scorer` is anything with ``score(texts, **kwargs) -> ScoreResult``
     (`Analyzer`, `LogProbService`, or a fake). `provenance` goes into the
     header (model id, dtype, BOS token, treebank ...) and is compared on resume.
+    `trees` (sentence id -> bracketed parse, from `ptb_tree_strings`) is stored
+    with each row so gold can be re-derived later without the corpus.
     Sentences whose base text fails to score are skipped and logged; a variant
     that fails is dropped and counted in ``table.failed``.
     """
     header = {
         "kind": "header", "schema": SCHEMA,
         "policy": policy.name, "proforms": list(policy.proforms),
+        **gold_header_fields(trees),
         **(provenance or {}),
     }
     done: dict[str, SpanCostTable] = {}
@@ -210,7 +250,7 @@ def compute_span_costs(
                 continue
             done[sentence.id] = table
             if fh is not None:
-                fh.write(json.dumps(table.to_json()) + "\n")
+                fh.write(json.dumps(_row(table, sentence, trees)) + "\n")
                 fh.flush()
                 os.fsync(fh.fileno())
                 since_mirror += 1
@@ -226,6 +266,14 @@ def compute_span_costs(
         if sentence.id in done:
             tables.append(done[sentence.id])
     return tables
+
+
+def _row(table: SpanCostTable, sentence: TreebankSentence, trees: Mapping[str, str] | None) -> dict[str, Any]:
+    """One cache line: the raw scores plus the sentence's answer key."""
+    row = table.to_json()
+    for key, value in sentence_to_json(sentence, trees).items():
+        row.setdefault(key, value)
+    return row
 
 
 def _mirror(path: Path, mirror_path: str | os.PathLike) -> None:

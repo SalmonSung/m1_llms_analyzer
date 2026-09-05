@@ -122,8 +122,9 @@ class FakeSpanScorer:
                 else:
                     cost = FAKE_COST_NEUTRAL
                 for k, proform in enumerate(proforms):
-                    text = detokenize_ptb(substitute(s.words, i, j, proform))
-                    n = s.n - (j - i)
+                    replaced = substitute(s.words, i, j, proform)
+                    text = detokenize_ptb(replaced)
+                    n = max(1, len(replaced))
                     jitter = float(rng.normal(0, noise)) + 0.05 * k
                     self.table.setdefault(text, ((base_per_token - cost - jitter) * n, n))
 

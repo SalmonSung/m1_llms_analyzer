@@ -109,18 +109,22 @@ m1_llms_analyzer/
 │   │   │                          baselines, greedy_induce (cheapest first, never cross),
 │   │   │                          cky_induce (minimum total cost), bracket_prf, rank_curve.
 │   │   ├── proforms.py            Blind replacement policies (ReplacementPolicy Protocol):
-│   │   │                          MinOverSet, ByLengthClass, parse_policy, substitute.
+│   │   │                          MinOverSet (+ controls: scored and cached, never chosen),
+│   │   │                          ByLengthClass, parse_policy, substitute, and DELETION
+│   │   │                          ("<del>": drop the span, re-capitalise at position 0).
 │   │   ├── treebank.py            TreebankSentence + gold spans from trees (traces and
 │   │   │                          punctuation removed, unaries collapsed), PTB detokeniser,
 │   │   │                          load_ptb_nltk (the free NLTK WSJ sample), hand examples
-│   │   │                          incl. the theory doc's sentence, and save/load_gold_jsonl
-│   │   │                          (+ ptb_tree_strings) which export the answer key so a cost
-│   │   │                          cache can be re-analysed with no corpus installed.
-│   │   │                          UD is a documented stub.
+│   │   │                          incl. the theory doc's sentence, sentence_to/from_json +
+│   │   │                          gold_header_fields (the answer key as JSON, embedded in
+│   │   │                          the cost cache), ptb_tree_strings, and the standalone
+│   │   │                          save/load_gold_jsonl export. UD is a documented stub.
 │   │   ├── span_costs.py          Phase A: SpanCostTable (raw sum/count per proform x span,
 │   │   │                          cost derived on read), compute_span_costs with a resumable
 │   │   │                          JSONL cache (header check, fsync, truncated-line repair,
-│   │   │                          Drive mirror), load_span_costs, variant_count.
+│   │   │                          Drive mirror; every row also carries the sentence's gold
+│   │   │                          spans and tree), load_span_costs,
+│   │   │                          load_span_costs_with_gold, variant_count.
 │   │   └── task_1b.py             Phase B: evaluate_sentence, analyse_1b -> the fig_1b
 │   │                              record (sentence-level mean F1 + bootstrap CI, by length,
 │   │                              pooled rank curve, diagnostics), validate_record, verdict,
@@ -130,7 +134,9 @@ m1_llms_analyzer/
 │       ├── __init__.py            Marks the package; holds no logic.
 │       ├── env.py                 Secret resolution (Colab userdata -> env var -> None),
 │       │                          in_colab(), redact(). None is a valid, ungated result.
-│       ├── batching.py            chunk / maybe_progress / OOM_ERRORS and
+│       ├── batching.py            AdaptiveBatchSize (sticky halving, growth after clean
+│       │                          batches, ceiling below any size that ran out of memory),
+│       │                          chunk / maybe_progress / OOM_ERRORS and
 │       │                          run_with_oom_halving, shared by inference and scoring.
 │       ├── device.py              Device and dtype auto-selection (bf16 only when native:
 │       │                          a T4 gets fp16) + describe_device().
@@ -171,14 +177,19 @@ m1_llms_analyzer/
     │                              secrets, header-based clone auth, no committed outputs.
     ├── test_scoring.py            LogProbService against a manual log-softmax on the tiny
     │                              model; BOS policy; batch == single; non-finite -> failure;
-    │                              OOM halving; base head refuses; both heads coexist.
+    │                              OOM halving that sticks across calls; the batch-size
+    │                              calibration probe; base head refuses; both heads coexist.
+    ├── test_batching.py           AdaptiveBatchSize: sticky shrink, growth streaks, ceilings,
+    │                              lazy chunking, and the OOM hook in run_with_oom_halving.
     ├── test_spans.py              Crossing rule, baselines, greedy/CKY induction, F1 and
     │                              rank curve on the theory doc's 13-word example.
-    ├── test_proforms.py           Substitution text, policies, spec parsing.
+    ├── test_proforms.py           Substitution text (incl. deletion and multi-word
+    │                              proforms), policies with controls, spec parsing.
     ├── test_treebank.py           Tree -> gold spans (traces, punctuation, unaries),
     │                              detokeniser, the NLTK loader (skipped without the corpus).
     ├── test_span_costs.py         Cost table, normalisations, JSONL resume, header mismatch,
-    │                              truncated last line, failed variants, Drive mirror.
+    │                              truncated last line, failed variants, Drive mirror,
+    │                              controls, and the answer key embedded in each row.
     ├── test_task_1b.py            Record schema, statistics, verdict, and the real fig_1b /
     │                              fig_0c rendered from a FakeSpanScorer run.
     └── test_architecture_doc.py   Fails if this file omits any source file.
@@ -223,13 +234,14 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
         │           ──▶ LogProbService        (analyzer.score / score_one)
         │
         ├──▶ experiments.treebank.load_ptb_nltk(n, min_len, max_len, seed)
-        │        NLTK PTB sample -> TreebankSentence(words, text, gold_spans)
-        │     ──▶ outputs/task_1b/gold_<treebank>_<seed>.jsonl   (save_gold_jsonl)
+        │        NLTK PTB sample -> TreebankSentence(words, text, gold_spans) (+ tree strings)
         │
-        ├──▶ PHASE A (GPU)  experiments.span_costs.compute_span_costs(analyzer, sentences, policy)
-        │        every span x proform -> substitute -> detokenise -> score
+        ├──▶ PHASE A (GPU)  experiments.span_costs.compute_span_costs(analyzer, sentences, policy, trees)
+        │        LogProbService.calibrate_batch_size(longest variants) -> AdaptiveBatchSize
+        │        every span x (proform | control) -> substitute -> detokenise -> score
         │        raw (sum_logprob, n_tokens) per variant -> SpanCostTable
-        │     ──▶ outputs/task_1b/span_costs_<model>.jsonl   (append, fsync, resume)
+        │     ──▶ outputs/task_1b/span_costs_<model>_<policy>.jsonl   (append, fsync, resume)
+        │          one line per sentence: raw scores + words, gold_spans, source, info, tree
         │
         └──▶ PHASE B (CPU)  experiments.task_1b.analyse_1b(tables, sentences, policy, inducer)
                  cost(i, j) = policy.choose({p: mean_lp(x) - mean_lp(x'_p)})
@@ -239,10 +251,13 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
 ```
 
 Phase B is seconds, so a different inducer, normalisation, or proform subset is re-run
-from the cache without the GPU. The cost cache names sentences by id but holds no gold, so
-the gold export travels with it: `load_gold_jsonl` + `load_span_costs` reconstruct every
-phase-B input on a machine with no treebank installed. The same cache is Task 1a's raw data (every span is a
-"box" if it is gold, a "straddle" if it crosses gold).
+from the cache without the GPU. Controls (`blorp`, `<del>`) are in the cache like any
+proform but `MinOverSet.choose` never picks them, so the induced trees are unchanged by
+adding them. Each cache row carries the sentence's answer key, so
+`load_span_costs_with_gold` reconstructs every phase-B input on a machine with no treebank
+installed (the older two-file export, `save_gold_jsonl` + `load_gold_jsonl`, still works).
+The same cache is Task 1a's raw data (every span is a "box" if it is gold, a "straddle" if
+it crosses gold).
 
 ## Layer indexing convention
 

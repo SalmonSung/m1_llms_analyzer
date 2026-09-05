@@ -21,13 +21,32 @@ from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 DEFAULT_PROFORMS: tuple[str, ...] = ("it", "there", "did", "then")
 
+#: The reserved "proform" that deletes the span instead of replacing it. A control:
+#: it asks whether a cheap span is cheap because *any* shortening helps the mean.
+DELETION = "<del>"
+
 
 def substitute(words: Sequence[str], i: int, j: int, proform: str) -> list[str]:
-    """Words with ``words[i..j]`` replaced by `proform` (capitalised at i == 0)."""
+    """Words with ``words[i..j]`` replaced by `proform` (capitalised at i == 0).
+
+    `proform` may be several words (``"do so"``); it is inserted as one entry and
+    detokenised later. ``DELETION`` drops the span and, at i == 0, capitalises the
+    word that becomes sentence-initial, so the variant still reads as a sentence.
+    """
     if not (0 <= i <= j < len(words)):
         raise ValueError(f"span ({i}, {j}) is outside 0..{len(words) - 1}")
+    if proform == DELETION:
+        rest = list(words[:i]) + list(words[j + 1 :])
+        if i == 0 and rest:
+            rest[0] = rest[0][:1].upper() + rest[0][1:]
+        return rest
     replacement = proform[:1].upper() + proform[1:] if i == 0 else proform
     return list(words[:i]) + [replacement] + list(words[j + 1 :])
+
+
+def _clean(items: Sequence[str]) -> tuple[str, ...]:
+    """Strip, drop blanks, keep first occurrences in order."""
+    return tuple(dict.fromkeys(p.strip() for p in items if p.strip()))
 
 
 @runtime_checkable
@@ -47,23 +66,37 @@ class ReplacementPolicy(Protocol):
 
 
 class MinOverSet:
-    """Score each proform in the set; the span's cost is the cheapest."""
+    """Score each proform in the set; the span's cost is the cheapest.
 
-    def __init__(self, proforms: Sequence[str] = DEFAULT_PROFORMS):
-        if not proforms:
+    `controls` (``"blorp"``, ``DELETION`` ...) are scored and cached for every span
+    exactly like the proforms, so phase B can compare against them, but they never
+    take part in the min: the induction cost stays "does any real proform fit?".
+    """
+
+    def __init__(self, proforms: Sequence[str] = DEFAULT_PROFORMS, controls: Sequence[str] = ()):
+        self._proforms = _clean(proforms)
+        if not self._proforms:
             raise ValueError("MinOverSet needs at least one proform.")
-        self._proforms = tuple(dict.fromkeys(p.strip() for p in proforms if p.strip()))
+        self._controls = tuple(c for c in _clean(controls) if c not in self._proforms)
 
     @property
     def name(self) -> str:
-        return "min over {%s}" % ", ".join(self._proforms)
+        name = "min over {%s}" % ", ".join(self._proforms)
+        if self._controls:
+            name += " + controls {%s}" % ", ".join(self._controls)
+        return name
 
     @property
     def proforms(self) -> tuple[str, ...]:
-        return self._proforms
+        """Proforms then controls: everything phase A scores and a cache must hold."""
+        return self._proforms + self._controls
+
+    @property
+    def controls(self) -> tuple[str, ...]:
+        return self._controls
 
     def candidates(self, words: Sequence[str], i: int, j: int) -> list[str]:
-        return list(self._proforms)
+        return list(self.proforms)
 
     def choose(self, costs: Mapping[str, float]) -> float:
         available = [costs[p] for p in self._proforms if p in costs]
@@ -110,13 +143,17 @@ class ByLengthClass:
         return next(iter(costs.values()))
 
 
-def parse_policy(spec: str) -> ReplacementPolicy:
+def parse_policy(spec: str, controls: str = "") -> ReplacementPolicy:
     """Build a policy from a short string, for notebook config fields.
 
     ``"min:it,there,did,then"`` -> MinOverSet; ``"length:2-3=it,4-6=that,7+=this"``
-    -> ByLengthClass. A bare comma list means MinOverSet.
+    -> ByLengthClass. A bare comma list means MinOverSet. `controls` is a comma
+    list (``"blorp,<del>"``) that MinOverSet scores but never chooses; ``<del>`` is
+    the deletion control in either list.
     """
     spec = spec.strip()
+    if controls.strip() and spec.startswith("length:"):
+        raise ValueError("controls are only supported with a min-over-set policy")
     if spec.startswith("length:"):
         mapping: dict[tuple[int, int | None], str] = {}
         for part in spec[len("length:"):].split(","):
@@ -132,4 +169,4 @@ def parse_policy(spec: str) -> ReplacementPolicy:
         return ByLengthClass(mapping)
     if spec.startswith("min:"):
         spec = spec[len("min:"):]
-    return MinOverSet([p for p in spec.split(",") if p.strip()])
+    return MinOverSet(spec.split(","), controls=controls.split(","))

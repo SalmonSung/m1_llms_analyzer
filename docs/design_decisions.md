@@ -238,18 +238,37 @@ same costs for comparison; the record names the inducer.
 Pick a split point uniformly at random, recurse — the standard "random tree" baseline (not
 uniform over the Catalan set). K = 10 draws per sentence are averaged before the bootstrap.
 
-### The gold is exported next to the cost cache
-The cache identifies sentences by `fileid:index` and stores no answer key, so re-analysing it
-elsewhere would need NLTK, the corpus, and byte-identical conventions. `save_gold_jsonl` writes
-the words, text, spans and the conventions that produced them, and optionally each original
-bracketed parse. The two JSONL files together are a self-contained record: `load_gold_jsonl`
-needs no NLTK at all, and the stored trees allow gold to be re-derived under *different*
-conventions (keeping punctuation, say) without the corpus.
+### The answer key lives inside the cost cache
+The cache identifies sentences by `fileid:index`; rebuilding gold elsewhere would need NLTK,
+the corpus, and byte-identical conventions. Rather than a second file that must stay paired
+with the cache (an earlier design), every cache row carries the sentence's words, gold spans,
+provenance and, when `trees` are passed, its original bracketed parse; the header records the
+conventions that produced the spans. `load_span_costs_with_gold` therefore rebuilds tables
+and sentences from the one file with no NLTK at all, and the stored trees let gold be
+re-derived under *different* conventions (keeping punctuation, say) without the corpus.
+`save_gold_jsonl` / `load_gold_jsonl` remain for caches written before schema 2.
 
-### The proform policy is "min over {it, there, did, then}" until Task 1a says otherwise
-Every span is scored with each proform and the cheapest wins, blind to the label. All four
-are cached, so any fixed-by-length policy over these proforms can be evaluated later from
-the cache alone.
+### The proform policy is min over the real proforms; controls are cached but never chosen
+The notebook scores 15 proforms (`it, there, did, then, do so, does so, did so, done so,
+doing so, is, was, be, been, happens, happened`) and two *controls*: `blorp`, a nonsense
+word with no category (the floor every real proform should beat on its own category), and
+`<del>`, deletion of the span (is a cheap span cheap because any shortening helps the mean,
+or because the proform fits?). Every span is scored with all 17 and cached. The cost used
+for tree induction is the minimum over the 15 proforms only: if the controls competed,
+deletion would win most spans and the parse would measure shortening, not fit. Deletion
+needs its own substitution rule because an empty replacement leaves a lowercase
+sentence-initial word and a dangling period; `substitute` drops the span and re-capitalises
+the word that becomes initial.
+
+### Batch size is learned from the GPU, not typed in
+A Colab runtime is a T4 one day and an L4 the next, and the memory a batch needs depends on
+the model, dtype and sequence length, so no fixed number is right for both. With
+`batch_size="auto"` the scorer probes once, doubling a batch of the longest variant until it
+no longer fits, and starts there. During the run `AdaptiveBatchSize` keeps what it learns:
+a halving after an out-of-memory error sticks for the following chunks (the old per-chunk
+halving forgot, and paid the OOM again on every chunk), and after a streak of clean chunks
+the size doubles back, never above half of a size that already failed. An integer pins the
+size for reproducibility; it still halves on OOM but never grows.
 
 ---
 

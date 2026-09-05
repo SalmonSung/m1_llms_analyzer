@@ -60,6 +60,62 @@ def empty_cuda_cache() -> None:
         pass
 
 
+class AdaptiveBatchSize:
+    """A batch size that remembers what the device could handle.
+
+    The one-off halving in `run_with_oom_halving` rescues a chunk, but the next
+    chunk would start at the full size again and pay the OOM once more. This
+    keeps the halved size (`shrink`), and after `grow_after` consecutive clean
+    chunks doubles it again (`success`) -- never above `maximum`, and never
+    above half of a size that already ran out of memory in this run.
+    """
+
+    def __init__(self, initial: int, *, minimum: int = 1, maximum: int | None = None, grow_after: int = 8):
+        if initial < 1 or minimum < 1 or grow_after < 1:
+            raise ValueError("initial, minimum and grow_after must be >= 1.")
+        self.minimum = minimum
+        self.maximum = max(minimum, maximum if maximum is not None else initial)
+        self.current = min(max(initial, minimum), self.maximum)
+        self.grow_after = grow_after
+        #: Largest size growth may reach; lowered when a size runs out of memory.
+        self.ceiling = self.maximum
+        self._streak = 0
+        self.shrinks = 0
+        self.grows = 0
+
+    def shrink(self, failed_size: int | None = None) -> int:
+        """Halve after an OOM at `failed_size` (default: the current size)."""
+        failed = failed_size if failed_size is not None else self.current
+        target = max(self.minimum, failed // 2)
+        self.ceiling = max(self.minimum, min(self.ceiling, failed // 2))
+        if target < self.current:
+            log.warning("Batch size %d -> %d for the rest of the run (out of memory at %d).",
+                        self.current, target, failed)
+            self.current = target
+            self.shrinks += 1
+        self._streak = 0
+        return self.current
+
+    def success(self) -> int:
+        """Record a clean chunk; grow once `grow_after` of them are in a row."""
+        self._streak += 1
+        if self._streak >= self.grow_after and self.current < self.ceiling:
+            grown = min(self.ceiling, self.current * 2)
+            log.info("Batch size %d -> %d after %d clean batches.", self.current, grown, self._streak)
+            self.current = grown
+            self.grows += 1
+            self._streak = 0
+        return self.current
+
+    def chunks(self, items: Sequence[int]) -> Iterable[list[int]]:
+        """Slice `items` lazily, so a shrink or grow applies to the next slice."""
+        start = 0
+        while start < len(items):
+            stop = start + self.current
+            yield list(items[start:stop])
+            start = stop
+
+
 def run_with_oom_halving(
     indices: list[int],
     forward: Callable[[list[int]], Sequence[T]],
@@ -67,6 +123,7 @@ def run_with_oom_halving(
     on_item_error: Callable[[int, Exception, bool], None],
     *,
     raise_on_error: bool = False,
+    sizer: AdaptiveBatchSize | None = None,
 ) -> None:
     """Run `forward` over `indices`, halving on OOM and isolating item errors.
 
@@ -76,12 +133,15 @@ def run_with_oom_halving(
     record or raise. A non-OOM exception on a multi-item chunk is retried one
     item at a time so the failing item is identified and the rest survive
     (unless ``raise_on_error``, in which case it propagates immediately).
+    A `sizer` is told about every OOM so later chunks start smaller.
     """
     try:
         for index, result in zip(indices, forward(indices)):
             on_result(index, result)
         return
     except OOM_ERRORS as exc:
+        if sizer is not None:
+            sizer.shrink(len(indices))
         if len(indices) == 1:
             on_item_error(indices[0], exc, True)
             return
@@ -89,7 +149,8 @@ def run_with_oom_halving(
         log.warning("Out of memory at batch size %d; retrying in halves of %d.", len(indices), half)
         empty_cuda_cache()
         for sub in chunk(indices, half):
-            run_with_oom_halving(sub, forward, on_result, on_item_error, raise_on_error=raise_on_error)
+            run_with_oom_halving(sub, forward, on_result, on_item_error,
+                                 raise_on_error=raise_on_error, sizer=sizer)
         return
     except Exception as exc:  # noqa: BLE001 - isolate the bad item, keep the run
         if len(indices) == 1:

@@ -243,6 +243,44 @@ def ptb_tree_strings(sentences: Sequence[TreebankSentence], download: bool = Tru
     return out
 
 
+def gold_header_fields(trees: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """The conventions a gold export (or a cache that embeds gold) must declare."""
+    return {
+        "conventions": CONVENTIONS,
+        "punct_tags": sorted(PUNCT_TAGS),
+        "trace_tag": TRACE_TAG,
+        "includes_trees": bool(trees),
+    }
+
+
+def sentence_to_json(sentence: TreebankSentence, trees: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """The answer-key fields of one sentence: id, words, text, gold spans, provenance, tree."""
+    row: dict[str, Any] = {
+        "id": sentence.id,
+        "words": list(sentence.words),
+        "text": sentence.text,
+        "gold_spans": [list(sp) for sp in sorted(sentence.gold_spans)],
+        "source": sentence.source,
+        "info": {k: v for k, v in sentence.info.items() if k != "tree"},
+    }
+    tree = (trees or {}).get(sentence.id, sentence.info.get("tree"))
+    if tree is not None:
+        row["tree"] = tree
+    return row
+
+
+def sentence_from_json(obj: Mapping[str, Any]) -> TreebankSentence:
+    """Inverse of `sentence_to_json`; the tree, if any, lands in ``info["tree"]``."""
+    return TreebankSentence(
+        id=obj["id"],
+        words=list(obj["words"]),
+        gold_spans={tuple(sp) for sp in obj["gold_spans"]},
+        source=obj.get("source", "unknown"),
+        text=obj.get("text"),
+        info=dict(obj.get("info", {}), **({"tree": obj["tree"]} if "tree" in obj else {})),
+    )
+
+
 def save_gold_jsonl(
     sentences: Sequence[TreebankSentence],
     path: str | os.PathLike,
@@ -265,28 +303,14 @@ def save_gold_jsonl(
         "kind": "header",
         "schema": GOLD_SCHEMA,
         "n_sentences": len(sentences),
-        "conventions": CONVENTIONS,
-        "punct_tags": sorted(PUNCT_TAGS),
-        "trace_tag": TRACE_TAG,
-        "includes_trees": bool(trees),
+        **gold_header_fields(trees),
         **(provenance or {}),
     }
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as fh:
         fh.write(json.dumps(header) + "\n")
         for sentence in sentences:
-            row: dict[str, Any] = {
-                "kind": "sentence",
-                "id": sentence.id,
-                "n": sentence.n,
-                "words": list(sentence.words),
-                "text": sentence.text,
-                "gold_spans": [list(sp) for sp in sorted(sentence.gold_spans)],
-                "source": sentence.source,
-                "info": sentence.info,
-            }
-            if trees and sentence.id in trees:
-                row["tree"] = trees[sentence.id]
+            row: dict[str, Any] = {"kind": "sentence", "n": sentence.n, **sentence_to_json(sentence, trees)}
             fh.write(json.dumps(row) + "\n")
         fh.flush()
         os.fsync(fh.fileno())
@@ -307,16 +331,7 @@ def load_gold_jsonl(path: str | os.PathLike) -> tuple[dict[str, Any], list[Treeb
             if obj.get("kind") == "header":
                 header = obj
                 continue
-            sentences.append(
-                TreebankSentence(
-                    id=obj["id"],
-                    words=list(obj["words"]),
-                    gold_spans={tuple(sp) for sp in obj["gold_spans"]},
-                    source=obj.get("source", "unknown"),
-                    text=obj.get("text"),
-                    info=dict(obj.get("info", {}), **({"tree": obj["tree"]} if "tree" in obj else {})),
-                )
-            )
+            sentences.append(sentence_from_json(obj))
     if header is None:
         raise ValueError(f"{path} has no header line; it is not a gold export.")
     return header, sentences

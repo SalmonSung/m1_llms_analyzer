@@ -6,8 +6,12 @@ record that `experiment_figures.fig_1b` draws. See notebooks/experiment_1b.ipynb
 """
 
 from . import experiment_figures
-from .proforms import DEFAULT_PROFORMS, ByLengthClass, MinOverSet, ReplacementPolicy, parse_policy, substitute
-from .span_costs import SpanCostTable, compute_span_costs, load_span_costs, variant_count
+from .proforms import (
+    DEFAULT_PROFORMS, DELETION, ByLengthClass, MinOverSet, ReplacementPolicy, parse_policy, substitute,
+)
+from .span_costs import (
+    SpanCostTable, compute_span_costs, load_span_costs, load_span_costs_with_gold, variant_count,
+)
 from .spans import (
     INDUCERS,
     bracket_prf,
@@ -40,8 +44,9 @@ from .treebank import (
 
 __all__ = [
     "experiment_figures",
-    "DEFAULT_PROFORMS", "ByLengthClass", "MinOverSet", "ReplacementPolicy", "parse_policy", "substitute",
-    "SpanCostTable", "compute_span_costs", "load_span_costs", "variant_count",
+    "DEFAULT_PROFORMS", "DELETION", "ByLengthClass", "MinOverSet", "ReplacementPolicy", "parse_policy",
+    "substitute",
+    "SpanCostTable", "compute_span_costs", "load_span_costs", "load_span_costs_with_gold", "variant_count",
     "INDUCERS", "bracket_prf", "cky_induce", "crosses", "enumerate_spans", "greedy_induce",
     "left_branching", "random_binary", "rank_curve", "right_branching", "spans_to_brackets",
     "bootstrap_ci", "paired_bootstrap_diff", "trapezoid_area",
