@@ -116,3 +116,17 @@ def test_mock_figures_still_render(tmp_path):
     fig = EF.fig_1b(EF.mock_1b("true"), path=str(tmp_path / "mock.png"))
     plt.close(fig)
     validate_record(EF.mock_1b("false"))
+
+
+def test_controls_do_not_change_the_induced_record(sentences):
+    from m1_analyzer.experiments.proforms import DELETION
+
+    policy = MinOverSet(controls=["blorp", DELETION])
+    record, tables = run_task_1b(FakeSpanScorer(sentences, proforms=policy.proforms), sentences,
+                                 policy=policy, model="fake", show_progress=False, seed=0)
+    assert DELETION in tables[0].spans and "blorp" in tables[0].spans
+    assert record["diagnostics"]["policy"].endswith("+ controls {blorp, <del>}")
+    # Phase B over the same tables with the controls stripped from the policy: identical.
+    plain = analyse_1b(tables, sentences, policy=MinOverSet(), model="fake", seed=0)
+    for key in ("methods", "by_length", "rank_curve"):
+        assert record[key] == plain[key]

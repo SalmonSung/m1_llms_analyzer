@@ -35,7 +35,13 @@ import numpy as np
 
 from ..config.settings import ScoringConfig
 from ..domain.records import ExtractionFailure, ScoreResult, SentenceScore, make_item_id
-from ..utils.batching import chunk, maybe_progress, run_with_oom_halving
+from ..utils.batching import (
+    OOM_ERRORS,
+    AdaptiveBatchSize,
+    empty_cuda_cache,
+    maybe_progress,
+    run_with_oom_halving,
+)
 from ..utils.logging import get_logger
 from .interfaces import ModelProvider
 
@@ -47,9 +53,16 @@ _PREVIEW_CHARS = 200
 class LogProbService:
     """Scores texts under a causal language model."""
 
+    #: Starting size for ``batch_size="auto"`` when there is no CUDA device to probe.
+    CPU_AUTO_BATCH_SIZE = 32
+
     def __init__(self, provider: ModelProvider, config: ScoringConfig | None = None):
         self.provider = provider
         self.config = config or ScoringConfig()
+        #: The batch size learned so far; shared across score() calls so a halving
+        #: (or a calibration) on one sentence carries over to the next.
+        self.batch_sizer: AdaptiveBatchSize | None = None
+        self._sizer_key: tuple[Any, int] | None = None
 
     # -------------------------------------------------------------- public API
 
@@ -92,12 +105,15 @@ class LogProbService:
                 )
             self._fail(failures, index, texts[index], exc, config)
 
-        chunks = list(chunk(order, config.batch_size))
-        for indices in maybe_progress(chunks, show_progress, desc="scoring"):
+        sizer = self._sizer_for(config, texts)
+        for indices in maybe_progress(sizer.chunks(order), show_progress, desc="scoring"):
+            before = sizer.current
             run_with_oom_halving(
                 indices, forward, on_result, on_item_error,
-                raise_on_error=not config.continue_on_error,
+                raise_on_error=not config.continue_on_error, sizer=sizer,
             )
+            if sizer.current == before:
+                sizer.success()
 
         ordered = [scores[i] for i in sorted(scores)]
         elapsed = time.perf_counter() - started
@@ -116,6 +132,74 @@ class LogProbService:
             failure = result.failures[0]
             raise RuntimeError(f"{failure.error_type}: {failure.error}")
         return result.scores[0]
+
+    # ------------------------------------------------------------- batch size
+
+    def calibrate_batch_size(self, texts: Sequence[str], *, start: int = 8, **overrides: Any) -> int:
+        """Probe the device: the largest batch of copies of the longest text that fits.
+
+        Doubles from `start` until a forward pass runs out of memory or
+        ``max_batch_size`` is reached, then keeps the last size that worked. The
+        result seeds the adaptive sizer used by later `score()` calls. Call it
+        once, on the longest texts of the run, so the size is chosen against the
+        worst case rather than the first sentence.
+        """
+        config = self._with_overrides(overrides)
+        texts = self._validate_inputs(texts)
+        self._require_lm_head()
+        tokenizer = self.provider.tokenizer
+        longest = max(texts, key=lambda t: len(tokenizer(t, add_special_tokens=False)["input_ids"]))
+        max_length = self.provider.effective_max_length(config.max_length, config.max_length_cap)
+        maximum = config.max_batch_size
+
+        fits, size = 0, max(1, min(start, maximum))
+        while True:
+            try:
+                self._forward([longest] * size, max_length, config, False)
+            except OOM_ERRORS:
+                empty_cuda_cache()
+                if fits:
+                    break
+                if size == 1:
+                    raise RuntimeError(
+                        "One copy of the longest text exhausts device memory. Lower "
+                        "ScoringConfig.max_length or logit_chunk, or use a smaller model."
+                    )
+                size = max(1, size // 2)
+                continue
+            fits = size
+            if size >= maximum:
+                break
+            size = min(size * 2, maximum)
+
+        self.batch_sizer = AdaptiveBatchSize(fits, maximum=maximum)
+        if fits < maximum:
+            self.batch_sizer.ceiling = fits  # growth must not retry the size that failed
+        self._sizer_key = self._key(config)
+        log.info("Calibrated batch size: %d (%d-token longest text, ceiling %d).", fits,
+                 len(tokenizer(longest, add_special_tokens=False)["input_ids"]), self.batch_sizer.ceiling)
+        return fits
+
+    @staticmethod
+    def _key(config: ScoringConfig) -> tuple[Any, int]:
+        return (config.batch_size, config.max_batch_size)
+
+    def _sizer_for(self, config: ScoringConfig, texts: Sequence[str]) -> AdaptiveBatchSize:
+        """The sizer for this config; built (or calibrated) on first use."""
+        if self.batch_sizer is not None and self._sizer_key == self._key(config):
+            return self.batch_sizer
+        if config.batch_size == "auto":
+            if str(self.provider.device).startswith("cuda"):
+                self.calibrate_batch_size(texts, **{k: v for k, v in vars(config).items()})
+                return self.batch_sizer
+            log.info("batch_size='auto' without a CUDA device: starting at %d, growing to at most %d.",
+                     self.CPU_AUTO_BATCH_SIZE, config.max_batch_size)
+            self.batch_sizer = AdaptiveBatchSize(min(self.CPU_AUTO_BATCH_SIZE, config.max_batch_size),
+                                                 maximum=config.max_batch_size)
+        else:
+            self.batch_sizer = AdaptiveBatchSize(int(config.batch_size), maximum=int(config.batch_size))
+        self._sizer_key = self._key(config)
+        return self.batch_sizer
 
     # ----------------------------------------------------------- forward pass
 

@@ -146,3 +146,65 @@ def test_causal_head_rejects_models_without_one(tiny_model_path, monkeypatch):
 
     with pytest.raises(UnsupportedArchitectureError, match="no causal language-model head"):
         service._require_causal_lm(NotCausal())
+
+
+def test_halved_batch_size_sticks_across_calls_and_grows_back(lm):
+    scorer = LogProbService(lm, ScoringConfig(batch_size="auto", max_batch_size=8))
+    scorer.batch_sizer = None
+    original = scorer._forward
+    seen = []
+
+    def oom_above_two(texts, *args, **kwargs):
+        seen.append(len(texts))
+        if len(texts) > 2:
+            raise MemoryError("simulated OOM")
+        return original(texts, *args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(scorer, "_forward", oom_above_two)
+    try:
+        texts = ["one two", "three four five", "six seven", "eight nine ten", "eleven twelve"]
+        assert scorer.score(texts).ok
+        assert scorer.batch_sizer.current == 2 and seen[0] > 2  # the CPU default was tried once
+        seen.clear()
+        assert scorer.score(texts).ok
+        assert max(seen) == 2  # the second call starts at the learned size: no OOM at all
+        for _ in range(scorer.batch_sizer.grow_after * 2):
+            scorer.batch_sizer.success()
+        assert scorer.batch_sizer.current == 2  # growth never retries a size that failed
+    finally:
+        monkeypatch.undo()
+
+
+def test_calibration_finds_the_largest_batch_that_fits(lm):
+    scorer = LogProbService(lm, ScoringConfig(max_batch_size=64))
+    original = scorer._forward
+    tried = []
+
+    def oom_at_32(texts, *args, **kwargs):
+        tried.append(len(texts))
+        if len(texts) >= 32:
+            raise MemoryError("simulated OOM")
+        return original(texts, *args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(scorer, "_forward", oom_at_32)
+    try:
+        assert scorer.calibrate_batch_size(["a b c", "one two three four five"], start=8) == 16
+        assert tried == [8, 16, 32]
+        assert scorer.batch_sizer.current == 16 and scorer.batch_sizer.ceiling == 16
+        tried.clear()
+        assert scorer.score(["a b", "c d e", "f g"]).ok and max(tried) <= 16
+    finally:
+        monkeypatch.undo()
+    # Without any OOM the probe stops at max_batch_size.
+    scorer = LogProbService(lm, ScoringConfig(max_batch_size=16))
+    assert scorer.calibrate_batch_size(["a b c"], start=4) == 16
+    assert scorer.batch_sizer.ceiling == 16
+
+
+def test_pinned_batch_size_overrides_reset_the_sizer(scorer):
+    scorer.score(["a b", "c d", "e f", "g h", "i j"])
+    assert scorer.batch_sizer.current == 4 and scorer.batch_sizer.maximum == 4
+    scorer.score(["a b", "c d", "e f"], batch_size=2)
+    assert scorer.batch_sizer.maximum == 2

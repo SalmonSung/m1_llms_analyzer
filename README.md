@@ -89,8 +89,9 @@ python scripts/run_extraction.py \
 `notebooks/experiment_1b.ipynb` runs **Task 1b — does substitution FIND constituents?**
 Same two secrets as above, a GPU runtime, *Run all*. It smoke-tests the whole chain on a
 tiny model, loads 1000 sentences of the free NLTK Penn Treebank sample with their gold
-brackets, scores every span × proform variant on `Qwen/Qwen3-0.6B-Base` (phase A, GPU,
-resumable), induces a bracketing per sentence and scores it against gold and the trivial
+brackets, scores every span × replacement variant (15 proforms plus the `blorp` and deletion
+controls) on `Qwen/Qwen3-0.6B-Base` (phase A, GPU, batch size probed per GPU, resumable;
+the cache embeds the gold), induces a bracketing per sentence and scores it against gold and the trivial
 baselines (phase B, CPU, seconds), then draws `fig_1b` and `fig_0c` and copies everything to
 Drive. Background: `theory_1b_bracket_induction.md` (outside this repo).
 
@@ -106,7 +107,8 @@ analyzer  = Analyzer.for_scoring("Qwen/Qwen3-0.6B-Base")        # loads the LM h
 analyzer.score_one("The tall man opened the door.").mean_logprob  # nats per predicted token
 
 sentences = load_ptb_nltk(1000, min_len=5, max_len=30, seed=42)  # gold brackets included
-policy    = MinOverSet(["it", "there", "did", "then"])            # blind: cheapest proform wins
+policy    = MinOverSet(["it", "there", "did", "then"],             # blind: cheapest proform wins
+                       controls=["blorp", "<del>"])               # scored + cached, never chosen
 tables    = compute_span_costs(analyzer, sentences, policy,       # phase A, cached + resumable
                                cache_path="outputs/task_1b/span_costs.jsonl",
                                provenance={"model_id": "Qwen/Qwen3-0.6B-Base"})

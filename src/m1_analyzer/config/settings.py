@@ -99,7 +99,13 @@ class ExtractionConfig:
 class ScoringConfig:
     """How sentence log-probabilities are computed (requires ``head="causal_lm"``)."""
 
-    batch_size: int = 64
+    #: Texts per forward pass, or ``"auto"``: probe the device once for the largest
+    #: batch of the longest text that fits, then adapt (halve on OOM, grow back
+    #: after a run of clean batches) up to `max_batch_size`. An integer pins the
+    #: size; it still halves on OOM but never grows past the pinned value.
+    batch_size: int | str = 64
+    #: Ceiling for ``batch_size="auto"`` (calibration probe and growth).
+    max_batch_size: int = 512
     #: None -> the model's own context length (capped by max_length_cap).
     max_length: int | None = None
     #: Scored texts are short sentences; a low cap keeps the logits tensor small.
@@ -114,8 +120,13 @@ class ScoringConfig:
     logit_chunk: int = 8
 
     def __post_init__(self) -> None:
-        if self.batch_size < 1:
+        if isinstance(self.batch_size, str):
+            if self.batch_size != "auto":
+                raise ValueError(f"batch_size must be a positive int or 'auto', got {self.batch_size!r}.")
+        elif self.batch_size < 1:
             raise ValueError("batch_size must be >= 1.")
+        if self.max_batch_size < 1:
+            raise ValueError("max_batch_size must be >= 1.")
         if self.max_length is not None and self.max_length < 1:
             raise ValueError("max_length must be >= 1 when set.")
         if self.max_length_cap < 1:

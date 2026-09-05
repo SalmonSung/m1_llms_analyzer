@@ -81,3 +81,12 @@ def test_scoring_config_defaults_and_fingerprint_sensitivity():
     assert ScoringConfig().bos_policy == "auto"
     assert RunConfig().fingerprint() != RunConfig(scoring=ScoringConfig(batch_size=8)).fingerprint()
     assert RunConfig().fingerprint() != RunConfig(model=ModelConfig(head="causal_lm")).fingerprint()
+
+
+def test_scoring_batch_size_accepts_auto_only_as_a_string():
+    assert ScoringConfig(batch_size="auto").batch_size == "auto"
+    assert ScoringConfig().max_batch_size >= ScoringConfig().batch_size
+    with pytest.raises(ValueError, match="auto"):
+        ScoringConfig(batch_size="big")
+    with pytest.raises(ValueError, match="max_batch_size"):
+        ScoringConfig(max_batch_size=0)
