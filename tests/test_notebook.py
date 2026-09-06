@@ -19,13 +19,13 @@ from pathlib import Path
 import pytest
 
 NOTEBOOKS_DIR = Path(__file__).resolve().parents[1] / "notebooks"
-NOTEBOOKS = ("colab_entrypoint.ipynb", "experiment_1b.ipynb")
+NOTEBOOKS = ("colab_entrypoint.ipynb", "experiment_1b.ipynb", "experiment_9a.ipynb")
 NOTEBOOK = NOTEBOOKS_DIR / NOTEBOOKS[0]
 
 
 @pytest.fixture(scope="module", params=NOTEBOOKS)
 def notebook(request) -> dict:
-    """Each check runs against every notebook; both must clone via the same bootstrap."""
+    """Each check runs against every notebook; all must clone via the same bootstrap."""
     path = NOTEBOOKS_DIR / request.param
     assert path.exists(), f"{path} is a Colab notebook and must exist."
     return json.loads(path.read_text(encoding="utf-8"))

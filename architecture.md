@@ -38,19 +38,27 @@ m1_llms_analyzer/
 │
 ├── notebooks/
 │   ├── colab_entrypoint.ipynb     THE extraction entrypoint. Paste into Colab, Run all.
-│   └── experiment_1b.ipynb        Task 1b (does substitution FIND constituents?): same
-│                                  bootstrap, then smoke test -> treebank -> model ->
-│                                  one-sentence walkthrough -> phase A scoring (resumable)
-│                                  -> phase B analysis -> fig_1b / fig_0c -> Drive.
+│   ├── experiment_1b.ipynb        Task 1b (does substitution FIND constituents?): same
+│   │                              bootstrap, then smoke test -> treebank -> model ->
+│   │                              one-sentence walkthrough -> phase A scoring (resumable)
+│   │                              -> phase B analysis -> fig_1b / fig_0c -> Drive.
+│   └── experiment_9a.ipynb        Task 9a (omittability by splicing, length-matched, with
+│                                  the hand audit): same bootstrap, smoke test -> model ->
+│                                  Wikipedia paragraphs -> one-paragraph walkthrough ->
+│                                  phase A splice scoring (resumable, pre-registered
+│                                  header) -> audit sheet out / back in -> phase B
+│                                  stratified analysis -> fig_9a -> Drive.
 │
 ├── src/m1_analyzer/
 │   ├── __init__.py                Public API surface: re-exports Analyzer, configs, records.
 │   ├── container.py               `Analyzer` facade + wiring. Builds the services from one
 │   │                              RunConfig; owns the loaded model for the session;
 │   │                              exposes invoke / batch / save / run (hidden states),
-│   │                              score / score_one (log-probabilities, when the model was
-│   │                              loaded with head="causal_lm"; `Analyzer.for_scoring`),
-│   │                              describe / unload, and builds the RunManifest.
+│   │                              score / score_one (log-probabilities) and
+│   │                              next_token_states (full next-token vectors), both when
+│   │                              the model was loaded with head="causal_lm"
+│   │                              (`Analyzer.for_scoring`), describe / unload, and builds
+│   │                              the RunManifest.
 │   ├── cli.py                     argparse entrypoint (`m1-extract`). Same pipeline from a
 │   │                              terminal or CI; reads inputs from flags, lines, JSON, JSONL.
 │   ├── testing.py                 Builds a tiny random GPT-2 + tokenizer on disk, offline.
@@ -61,6 +69,8 @@ m1_llms_analyzer/
 │   │                              FakeSpanScorer, a SequenceScorer that knows the gold
 │   │                              tree, for testing the experiment analyses without a
 │   │                              model (the tiny tokenizer cannot spell the proforms).
+│   │                              The tiny vocabulary carries sentence punctuation so
+│   │                              the splice experiment runs on it end to end.
 │   │
 │   ├── config/
 │   │   ├── __init__.py            Re-exports the config dataclasses.
@@ -74,6 +84,7 @@ m1_llms_analyzer/
 │   │   ├── __init__.py            Re-exports the record types.
 │   │   └── records.py             The data services exchange: LayerState, ExtractionRecord,
 │   │                              ExtractionFailure, BatchResult, SentenceScore, ScoreResult,
+│   │                              StateResult (next-token vectors at chosen positions),
 │   │                              RunManifest, WrittenPaths, make_item_id (sha256 content
 │   │                              id). Holds numpy, never torch, so results need no CUDA
 │   │                              context to read.
@@ -105,6 +116,10 @@ m1_llms_analyzer/
 │   │   │                          fig_<task>(record, path) plus mock_<task> data and the
 │   │   │                          record schema each figure expects (in its docstring).
 │   │   ├── stats.py               bootstrap_ci, paired_bootstrap_diff, trapezoid_area.
+│   │   ├── jsonl_cache.py         The resumable JSONL cache both phase-A scorers use:
+│   │   │                          read (truncated last line dropped), header check that
+│   │   │                          names the differing field, atomic rewrite, fsynced
+│   │   │                          append, Drive mirror.
 │   │   ├── spans.py               Span algebra: enumerate_spans, crosses, right/left/random
 │   │   │                          baselines, greedy_induce (cheapest first, never cross),
 │   │   │                          cky_induce (minimum total cost), bracket_prf, rank_curve.
@@ -125,10 +140,31 @@ m1_llms_analyzer/
 │   │   │                          Drive mirror; every row also carries the sentence's gold
 │   │   │                          spans and tree), load_span_costs,
 │   │   │                          load_span_costs_with_gold, variant_count.
-│   │   └── task_1b.py             Phase B: evaluate_sentence, analyse_1b -> the fig_1b
-│   │                              record (sentence-level mean F1 + bootstrap CI, by length,
-│   │                              pooled rank curve, diagnostics), validate_record, verdict,
-│   │                              run_task_1b (A then B).
+│   │   ├── task_1b.py             Phase B: evaluate_sentence, analyse_1b -> the fig_1b
+│   │   │                          record (sentence-level mean F1 + bootstrap CI, by length,
+│   │   │                          pooled rank curve, diagnostics), validate_record, verdict,
+│   │   │                          run_task_1b (A then B).
+│   │   ├── boundaries.py          Task 9a: sentence-final token positions (punkt or a
+│   │   │                          regex splitter, mapped through tokenizer offsets; every
+│   │   │                          rejected sentence end counted) and clause-final ones
+│   │   │                          (`, ; :` and dashes), the two boundary kinds a cut may join.
+│   │   ├── paragraphs.py          Task 9a corpus: Paragraph, select_paragraphs (token-count
+│   │   │                          and sentence-count filter, seeded sample from a
+│   │   │                          source-order pool), Wikipedia streamed through
+│   │   │                          `datasets`, plain-text / JSONL files, hand_paragraphs.
+│   │   ├── splice.py              Task 9a phase A: admissible_cuts (same boundary type,
+│   │   │                          `window` tokens after j), splice_ids / splice_text,
+│   │   │                          score_paragraph (endpoint distance d, per-position
+│   │   │                          divergences div_k and their median, spliced fluency,
+│   │   │                          re-tokenisation check, join snippet), compute_splices
+│   │   │                          with the pre-registration as the cache header (measure,
+│   │   │                          window, strata, decile, matching width), load_splices.
+│   │   └── task_9a.py             Task 9a phase B: close / far deciles within
+│   │                              length-matching bins inside each stratum, the audit
+│   │                              sample / CSV sheet / read-back, the stratified
+│   │                              permutation test, the paragraph-level cluster bootstrap,
+│   │                              pooled and continuous diagnostics, analyse_9a -> the
+│   │                              fig_9a record, validate_record, verdict.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -192,6 +228,19 @@ m1_llms_analyzer/
     │                              controls, and the answer key embedded in each row.
     ├── test_task_1b.py            Record schema, statistics, verdict, and the real fig_1b /
     │                              fig_0c rendered from a FakeSpanScorer run.
+    ├── test_state_service.py      Next-token vectors against a manual log-softmax, BOS
+    │                              policies, batch == single, prefix invariance, guards.
+    ├── test_boundaries.py         Sentence / clause boundary positions, rejections counted,
+    │                              punkt named when missing.
+    ├── test_paragraphs.py         Cleaning, the token / sentence filter, seeded sampling,
+    │                              text and JSONL sources.
+    ├── test_splice.py             Admissible cuts, splicing on ids and text, one cut
+    │                              recomputed by hand from the state service, resume,
+    │                              the pre-registration guard, truncated-line repair.
+    ├── test_task_9a.py            Labels within matching bins, a planted effect passes and
+    │                              a null fails, the pooled confound, the permutation test,
+    │                              the audit round trip with failures excluded, deviations
+    │                              recorded, the real and mock fig_9a.
     └── test_architecture_doc.py   Fails if this file omits any source file.
 ```
 
@@ -259,6 +308,36 @@ installed (the older two-file export, `save_gold_jsonl` + `load_gold_jsonl`, sti
 The same cache is Task 1a's raw data (every span is a "box" if it is gold, a "straddle" if
 it crosses gold).
 
+## How an experiment flows (Task 9a)
+
+```
+notebooks/experiment_9a.ipynb
+        │  RunConfig(model=ModelConfig(head="causal_lm"))
+        ▼
+container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
+        │           ──▶ NextTokenStateService (analyzer.states / next_token_states)
+        │
+        ├──▶ experiments.paragraphs.load_wikipedia_paragraphs(count_tokens, n, min/max tokens, seed)
+        │        streamed articles -> lines -> clean -> token + sentence filter -> seeded sample
+        │
+        ├──▶ PHASE A (GPU)  experiments.splice.compute_splices(states, paragraphs, window, cache_path, ...)
+        │        header = preregistration(measure, window, strata, decile, match_width)  written FIRST
+        │        per paragraph: boundaries (boundaries.py) -> admissible cuts (same type, window after j)
+        │          one pass of the original -> endpoint states + downstream states
+        │          one pass per cut of ids[:i+1] + ids[j+1:] -> states at i+1..i+window
+        │          d = |S_i - S_j|, div_k = |S'_{i+1+k} - S_{j+1+k}|, div = median_k, fl, retokenises
+        │     ──▶ outputs/task_9a/splices_<model>_<corpus>_w<window>.jsonl   (append, fsync, resume)
+        │
+        ├──▶ AUDIT  task_9a.assign_pairs -> audit_sample(10 close, 10 far, 10 other) -> write_audit_csv
+        │        a person fills `grammatical` (y/n) on text alone -> load_audit_csv
+        │
+        └──▶ PHASE B (CPU)  experiments.task_9a.analyse_9a(rows, header, audit)
+                 labels: bottom / top decile of d within MATCH_WIDTH-token bins of each stratum
+                 stratified ratio (weighted log median ratio) + permutation p (labels shuffled within bins)
+                 paragraph-level cluster bootstrap CI; pooled and residual diagnostics; audit summary
+              ──▶ record (fig_9a schema + strata/stratified/pooled/audit) ──▶ experiment_figures.fig_9a ──▶ PNG
+```
+
 ## Layer indexing convention
 
 `output_hidden_states=True` returns `num_hidden_layers + 1` tensors:
@@ -281,6 +360,7 @@ for and the resolved absolute index, so a saved result is never ambiguous.
 | Attention weights as well as hidden states | `inference_service._forward` (`output_attentions=True`), `domain/records.py`, `storage_service` |
 | Encoder-decoder support | `model_service._reject_unsupported` and `_forward` (decoder states are a separate output) |
 | Remote/HTTP model host | New class satisfying `ModelProvider`; nothing else changes |
-| A new experiment task | New `experiments/task_<id>.py` producing the record its `fig_<id>` docstring specifies; reuse `treebank.py`, `spans.py`, `span_costs.py`, `stats.py`; a notebook copied from `experiment_1b.ipynb` |
+| A new experiment task | New `experiments/task_<id>.py` producing the record its `fig_<id>` docstring specifies; reuse `treebank.py`, `spans.py`, `span_costs.py`, `stats.py`, `jsonl_cache.py`; a notebook copied from `experiment_1b.ipynb` or `experiment_9a.ipynb` |
+| A state-level experiment (distances between next-token vectors) | `NextTokenStateService.states(ids, positions)` via `analyzer.states`; see `experiments/splice.py` for the alignment bookkeeping |
 | Another treebank (UD) | `experiments/treebank.py` (`load_ud_conllu`: subtree yields -> spans, drop non-projective); name the conversion in the record's `treebank` field |
 | Another replacement policy | A class satisfying `ReplacementPolicy` in `experiments/proforms.py`; if its proforms are a subset of a cache's header, phase B alone suffices |

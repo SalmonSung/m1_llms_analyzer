@@ -837,25 +837,36 @@ def fig_9a(rec, path=None):
     RECORD
       {"cuts": [{"pair": "close"|"far", "grammatical": bool, "seg_len": int,
                  "divergence": float}, ...],
-       "divergence_measure": str, "window": int, "meta": {...}}
+       "divergence_measure": str, "window": int, "meta": {...},
+       OPTIONAL "strata": [{"lo": int, "hi": int, "label": str, ...}, ...],
+       OPTIONAL "stratified": {"ratio": float, "ci": [lo, hi], "p": float}}
       One row per deletion: pair = whether the two endpoint states were close
-      or far; grammatical = whether the spliced text is grammatical (judged
-      BEFORE looking at divergence); seg_len = tokens deleted; divergence =
-      the pre-registered downstream measure over `window` aligned positions.
+      or far; grammatical = the hand-audit outcome (admissibility already makes
+      the splice grammatical BY CONSTRUCTION - both endpoints the same boundary
+      type - so this field records audit failures, not a post-hoc label);
+      seg_len = tokens deleted; divergence = the pre-registered downstream
+      measure over `window` aligned positions. Compare WITHIN seg_len strata:
+      divergence tracks seg_len at Spearman ~+0.9, so a pooled comparison
+      measures deleted length, not endpoint distance. When the record carries
+      "strata" (the pre-registered [lo, hi) edges) panel B uses them and the
+      title prints the stratified estimate; otherwise data tertiles and the
+      pooled numbers are shown, as in the runbook's original.
       Only grammatical cuts enter the comparison (Task 9's control); the
       ungrammatical ones are drawn hollow and never summarised.
 
-    FIGURE  A: ECDF of divergence for close vs far GRAMMATICAL cuts; medians,
-      ratio and one-sided Mann-Whitney p printed. B: far/close median ratio by
-      segment-length stratum with n.
-    PASS  Far cuts diverge more at p < 0.05 once grammaticality is matched.
-    FAIL  Ratio near 1.0 with matched grammaticality.
+    FIGURE  A: ECDF of divergence for close vs far GRAMMATICAL cuts; the
+      stratified far/close ratio, its cluster-bootstrap CI and permutation p
+      in the title (pooled medians when no stratified estimate is present).
+      B: far/close median ratio by segment-length stratum with n.
+    PASS  Far cuts diverge more at p < 0.05 within length strata.
+    FAIL  Stratified ratio near 1.0. A pooled ratio above 1.0 with unmatched
+      segment lengths is NOT a pass.
     """
     cuts = rec["cuts"]
     g = [c for c in cuts if c["grammatical"]]
     cl = np.array([c["divergence"] for c in g if c["pair"] == "close"])
     fa = np.array([c["divergence"] for c in g if c["pair"] == "far"])
-    p = stats.mannwhitneyu(fa, cl, alternative="greater").pvalue
+    p_pooled = stats.mannwhitneyu(fa, cl, alternative="greater").pvalue if len(cl) and len(fa) else np.nan
     fig, (axA, axB) = plt.subplots(1, 2, figsize=(10.4, 3.9), gridspec_kw={"width_ratios": [1.2, 1], "wspace": 0.55})
     _ecdf(axA, cl, BLUE, "close pair, grammatical cut (n=%d)" % len(cl))
     _ecdf(axA, fa, ORANGE, "far pair, grammatical cut (n=%d)" % len(fa))
@@ -865,42 +876,66 @@ def fig_9a(rec, path=None):
                     label="ungrammatical splice, excluded (n=%d)" % len(ung))
     axA.set_xlabel("downstream divergence over %d positions" % rec["window"])
     axA.set_ylabel("fraction of cuts"); axA.legend(frameon=False, loc="lower right"); axA.set_ylim(-0.03, 1.03)
-    axA.set_title("A  Medians %.1f vs %.1f = %.2f\u00d7, one-sided p = %.3f" % (
-        np.median(cl), np.median(fa), np.median(fa) / np.median(cl), p), loc="left"); axA.margins(x=0.05)
-    lens = sorted({c["seg_len"] for c in g})
-    edges = np.quantile(lens, [0, 0.33, 0.66, 1.0]).astype(int)
-    for k in range(3):
-        lo_, hi_ = edges[k], edges[k + 1]
-        sub = [c for c in g if lo_ <= c["seg_len"] <= hi_]
+    st = rec.get("stratified")
+    if st and np.isfinite(st.get("ratio", np.nan)) and np.isfinite(st.get("p", np.nan)):
+        ci = st.get("ci", [np.nan, np.nan])
+        axA.set_title("A  Stratified far/close = %.2f\u00d7 [%.2f, %.2f], permutation p = %.3f" % (
+            st["ratio"], ci[0], ci[1], st["p"]), loc="left")
+    else:
+        axA.set_title("A  Medians %.1f vs %.1f = %.2f\u00d7, one-sided p = %.3f (pooled)" % (
+            np.median(cl), np.median(fa), np.median(fa) / np.median(cl), p_pooled), loc="left")
+    axA.margins(x=0.05)
+
+    if rec.get("strata"):
+        strata = [(int(s["lo"]), int(s["hi"]), s.get("label") or "%d\u2013%d tokens" % (s["lo"], s["hi"] - 1))
+                  for s in rec["strata"]]
+    else:
+        lens = sorted({c["seg_len"] for c in g})
+        edges = np.quantile(lens, [0, 0.33, 0.66, 1.0]).astype(int)
+        strata = [(int(edges[k]), int(edges[k + 1]) + 1, "%d\u2013%d tokens" % (edges[k], edges[k + 1])) for k in range(3)]
+    for k, (lo_, hi_, _) in enumerate(strata):
+        sub = [c for c in g if lo_ <= c["seg_len"] < hi_]
         c_ = [c["divergence"] for c in sub if c["pair"] == "close"]; f_ = [c["divergence"] for c in sub if c["pair"] == "far"]
         if len(c_) > 2 and len(f_) > 2:
             rr = np.median(f_) / np.median(c_)
             bs = [np.median(RNG(k).choice(f_, len(f_))) / np.median(RNG(k + 7).choice(c_, len(c_))) for _ in range(300)]
             axB.plot([np.percentile(bs, 2.5), np.percentile(bs, 97.5)], [k, k], color=ORANGE, lw=1.6)
             axB.scatter([rr], [k], s=46, color=ORANGE, zorder=4)
-            axB.text(1.005, k, "n = %d / %d" % (len(c_), len(f_)), transform=axB.get_yaxis_transform(),
-                     va="center", fontsize=S_S, color=GREY)
+        axB.text(1.005, k, "n = %d / %d" % (len(c_), len(f_)), transform=axB.get_yaxis_transform(),
+                 va="center", fontsize=S_S, color=GREY)
     axB.axvline(1.0, color=GREY, ls="--", lw=1)
-    axB.set_yticks(range(3)); axB.set_yticklabels(["%d\u2013%d tokens" % (edges[k], edges[k + 1]) for k in range(3)])
+    axB.set_yticks(range(len(strata))); axB.set_yticklabels([lab for _, _, lab in strata])
     axB.set_xlabel("far / close median divergence"); axB.set_title("B  By deleted-segment length", loc="left")
     axB.margins(x=0.15, y=0.3)
     _goodness(axA, "orange right of blue = close pairs are skippable")
-    _caption(fig, rec, "Divergence: %s. Grammaticality judged before divergence was computed; ungrammatical splices never enter a summary." % rec["divergence_measure"])
+    _caption(fig, rec, "Divergence: %s. Grammaticality audited blind to divergence; ungrammatical splices never enter a summary. "
+             "Close/far = bottom/top decile of endpoint distance within each length stratum." % rec["divergence_measure"])
     fig.subplots_adjust(left=0.08, bottom=0.2, top=0.86, right=0.9)
     return _finish(fig, rec, path)
 
 
 def mock_9a(outcome="true", n=240, seed=13):
     r = RNG(seed)
+    strata = [(20, 40), (40, 80), (80, 160)]
     cuts = []
     for i in range(n):
         far = i % 2 == 1
         gram = r.random() < (0.9 if not far else 0.55)
-        base = 150 if not far else (185 if outcome == "true" else 152)
-        div = r.lognormal(np.log(base * (1.35 if not gram else 1.0)), 0.3)
+        lo, hi = strata[i % 3]
+        seg = int(r.integers(lo, hi))
+        base = 60 + 0.9 * seg                       # divergence tracks deleted length
+        if far and outcome == "true":
+            base *= 1.25
+        div = r.lognormal(np.log(base * (1.35 if not gram else 1.0)), 0.25)
         cuts.append(dict(pair="far" if far else "close", grammatical=bool(gram),
-                         seg_len=int(r.integers(4, 40)), divergence=float(div)))
-    return dict(cuts=cuts, divergence_measure="mean L2 of log-prob states", window=12,
+                         seg_len=seg, divergence=float(div)))
+    g = [c for c in cuts if c["grammatical"]]
+    rows = [dict(lo=lo, hi=hi, label="%d\u2013%d tokens" % (lo, hi - 1),
+                 n_close=sum(1 for c in g if lo <= c["seg_len"] < hi and c["pair"] == "close"),
+                 n_far=sum(1 for c in g if lo <= c["seg_len"] < hi and c["pair"] == "far")) for lo, hi in strata]
+    ratio = 1.25 if outcome == "true" else 1.01
+    return dict(cuts=cuts, divergence_measure="median L2 of aligned log-prob states", window=20,
+                strata=rows, stratified=dict(ratio=ratio, ci=[ratio - 0.1, ratio + 0.1], p=0.002 if outcome == "true" else 0.47),
                 mock=True, outcome=outcome, meta={"model": "mock"})
 
 

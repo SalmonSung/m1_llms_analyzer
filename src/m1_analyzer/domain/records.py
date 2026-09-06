@@ -135,6 +135,29 @@ class SentenceScore:
 
 
 @dataclass
+class StateResult:
+    """Next-token log-probability vectors at chosen positions of one token sequence.
+
+    ``positions`` are text-token positions (BOS excluded); ``states[k]`` is the
+    float32 log-softmax over the vocabulary for the token *after* position
+    ``positions[k]``. ``token_logprobs``, when asked for, is the log-probability
+    of every predicted token of the sequence, as `SentenceScore` counts them.
+    """
+
+    positions: list[int]
+    #: (len(positions), vocab_size) float32
+    states: np.ndarray
+    n_tokens: int
+    token_logprobs: np.ndarray | None = None
+
+    @property
+    def mean_logprob(self) -> float:
+        if self.token_logprobs is None or self.token_logprobs.size == 0:
+            return float("nan")
+        return float(self.token_logprobs.mean())
+
+
+@dataclass
 class ScoreResult:
     """Scores and failures from one ``score()`` call, in input order."""
 

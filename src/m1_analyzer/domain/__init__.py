@@ -6,6 +6,7 @@ from .records import (
     RunManifest,
     ScoreResult,
     SentenceScore,
+    StateResult,
     WrittenPaths,
     make_item_id,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "RunManifest",
     "ScoreResult",
     "SentenceScore",
+    "StateResult",
     "WrittenPaths",
     "make_item_id",
 ]

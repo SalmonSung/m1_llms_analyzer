@@ -25,11 +25,13 @@ from .domain.records import (
     RunManifest,
     ScoreResult,
     SentenceScore,
+    StateResult,
     WrittenPaths,
 )
 from .services.inference_service import InferenceService
 from .services.model_service import ModelLoadError, ModelService, UnsupportedArchitectureError
 from .services.scoring_service import LogProbService
+from .services.state_service import NextTokenStateService
 from .services.storage_service import StorageService, load_run
 from .utils.env import in_colab, resolve_hf_token
 from .utils.logging import configure_logging, get_logger
@@ -50,10 +52,12 @@ __all__ = [
     "RunManifest",
     "ScoreResult",
     "SentenceScore",
+    "StateResult",
     "WrittenPaths",
     "ModelService",
     "InferenceService",
     "LogProbService",
+    "NextTokenStateService",
     "StorageService",
     "ModelLoadError",
     "UnsupportedArchitectureError",
