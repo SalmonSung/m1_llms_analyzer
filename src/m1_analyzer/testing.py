@@ -28,6 +28,9 @@ DEFAULT_VOCAB = [
     "hello", "world", "the", "quick", "brown", "fox", "jumps", "over", "lazy",
     "dog", "a", "b", "c", "model", "layer", "hidden", "state", "token", "test",
     "one", "two", "three", "four", "five", "colab", "vector", "text",
+    # Sentence punctuation, so the splice experiment (Task 9a) can find sentence
+    # boundaries and re-tokenise a decoded splice on the tiny model.
+    ".", ",", "!", "?",
 ]
 
 

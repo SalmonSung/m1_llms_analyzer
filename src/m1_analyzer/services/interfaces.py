@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, Sequence, runtime_checkable
 
-from ..domain.records import BatchResult, ExtractionRecord, RunManifest, ScoreResult, WrittenPaths
+from ..domain.records import BatchResult, ExtractionRecord, RunManifest, ScoreResult, StateResult, WrittenPaths
 
 
 @runtime_checkable
@@ -61,6 +61,28 @@ class SequenceScorer(Protocol):
     """
 
     def score(self, texts: Sequence[str], **overrides: Any) -> ScoreResult: ...
+
+
+@runtime_checkable
+class StateProvider(Protocol):
+    """Turns token ids into next-token log-probability vectors (needs the LM head).
+
+    The splice experiment depends on this seam only, so the tiny offline model
+    (or a fake) can drive the whole pipeline in a test.
+    """
+
+    @property
+    def vocab_size(self) -> int: ...
+
+    def encode(self, text: str) -> list[int]: ...
+
+    def encode_with_offsets(self, text: str) -> tuple[list[int], list[tuple[int, int]]]: ...
+
+    def decode(self, ids: Sequence[int]) -> str: ...
+
+    def states(
+        self, sequences: Sequence[Sequence[int]], positions: Sequence[Sequence[int]], **kwargs: Any,
+    ) -> list[StateResult]: ...
 
 
 @runtime_checkable

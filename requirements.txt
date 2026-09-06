@@ -13,3 +13,5 @@ tqdm>=4.65
 nltk>=3.8
 matplotlib>=3.7
 scipy>=1.10
+# Experiment 9a (notebooks/experiment_9a.ipynb): streams Wikipedia paragraphs.
+datasets>=2.14

@@ -21,13 +21,13 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from ..utils.batching import maybe_progress
 from ..utils.logging import get_logger
+from .jsonl_cache import append_row, check_header, mirror, read_jsonl, rewrite, write_header
 from .proforms import ReplacementPolicy, substitute
 from .spans import Span, enumerate_spans
 from .treebank import (
@@ -118,34 +118,9 @@ class SpanCostTable:
 # ------------------------------------------------------------------ the cache
 
 
-def _read_jsonl(path: Path) -> tuple[dict | None, list[dict], bool]:
-    """``(header, rows, truncated)``; a broken *last* line is dropped with a warning."""
-    header, rows, truncated = None, [], False
-    with path.open("r", encoding="utf-8") as fh:
-        lines = fh.read().split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    for k, line in enumerate(lines):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            if k == len(lines) - 1:
-                truncated = True
-                log.warning("%s: last line is truncated (interrupted write); it will be rescored.", path)
-                break
-            raise ValueError(f"{path}: line {k + 1} is not valid JSON and is not the last line.")
-        if obj.get("kind") == "header":
-            header = obj
-        else:
-            rows.append(obj)
-    return header, rows, truncated
-
-
 def load_span_costs(path: str | os.PathLike) -> tuple[dict, list[SpanCostTable]]:
     """Read a cache back: ``(header, tables)``."""
-    header, rows, _ = _read_jsonl(Path(path))
+    header, rows, _ = read_jsonl(Path(path))
     if header is None:
         raise ValueError(f"{path} has no header line; it is not a span-cost cache.")
     return header, [SpanCostTable.from_json(r) for r in rows]
@@ -159,7 +134,7 @@ def load_span_costs_with_gold(
     Tables and sentences are index-aligned. Needs no NLTK: this is everything
     phase B (`analyse_1b`) takes.
     """
-    header, rows, _ = _read_jsonl(Path(path))
+    header, rows, _ = read_jsonl(Path(path))
     if header is None:
         raise ValueError(f"{path} has no header line; it is not a span-cost cache.")
     missing = [r.get("id", "?") for r in rows if "gold_spans" not in r]
@@ -170,26 +145,6 @@ def load_span_costs_with_gold(
             "gold_*.jsonl via load_gold_jsonl instead."
         )
     return header, [SpanCostTable.from_json(r) for r in rows], [sentence_from_json(r) for r in rows]
-
-
-def _check_header(existing: dict, wanted: dict, path: Path) -> None:
-    for key, value in wanted.items():
-        if key in _UNCHECKED_HEADER_KEYS:
-            continue
-        if key in existing and existing[key] != value:
-            raise ValueError(
-                f"{path} was written for {key}={existing[key]!r}, but this run has {key}={value!r}. "
-                "Use a different cache_path, or delete the file to rescore."
-            )
-
-
-def _rewrite(path: Path, header: dict, rows: list[dict]) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps(header) + "\n")
-        for row in rows:
-            fh.write(json.dumps(row) + "\n")
-    os.replace(tmp, path)
 
 
 def compute_span_costs(
@@ -224,20 +179,16 @@ def compute_span_costs(
     done: dict[str, SpanCostTable] = {}
     path = Path(cache_path) if cache_path else None
     if path is not None and path.exists():
-        existing, rows, truncated = _read_jsonl(path)
+        existing, rows, truncated = read_jsonl(path)
         if existing is not None:
-            _check_header(existing, header, path)
+            check_header(existing, header, path, unchecked=_UNCHECKED_HEADER_KEYS)
         for row in rows:
             done[row["id"]] = SpanCostTable.from_json(row)
         if truncated:
-            _rewrite(path, existing or header, rows)
+            rewrite(path, existing or header, rows)
         log.info("Resuming: %d of %d sentences already scored in %s.", len(done), len(sentences), path)
     elif path is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as fh:
-            fh.write(json.dumps(header) + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
+        write_header(path, header)
 
     tables: list[SpanCostTable] = []
     fh = path.open("a", encoding="utf-8") if path is not None else None
@@ -250,18 +201,16 @@ def compute_span_costs(
                 continue
             done[sentence.id] = table
             if fh is not None:
-                fh.write(json.dumps(_row(table, sentence, trees)) + "\n")
-                fh.flush()
-                os.fsync(fh.fileno())
+                append_row(fh, _row(table, sentence, trees))
                 since_mirror += 1
                 if mirror_path and since_mirror >= mirror_every:
-                    _mirror(path, mirror_path)
+                    mirror(path, mirror_path)
                     since_mirror = 0
     finally:
         if fh is not None:
             fh.close()
         if mirror_path and path is not None and since_mirror:
-            _mirror(path, mirror_path)
+            mirror(path, mirror_path)
     for sentence in sentences:
         if sentence.id in done:
             tables.append(done[sentence.id])
@@ -274,12 +223,6 @@ def _row(table: SpanCostTable, sentence: TreebankSentence, trees: Mapping[str, s
     for key, value in sentence_to_json(sentence, trees).items():
         row.setdefault(key, value)
     return row
-
-
-def _mirror(path: Path, mirror_path: str | os.PathLike) -> None:
-    target = Path(mirror_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(path, target)
 
 
 def _score_sentence(scorer, sentence: TreebankSentence, policy: ReplacementPolicy, score_kwargs) -> SpanCostTable | None:

@@ -272,6 +272,91 @@ size for reproducibility; it still halves on OOM but never grows.
 
 ---
 
+## Experiments (Task 9a)
+
+### Next-token states are a separate service, fed token ids
+The scorer never materialises a full log-softmax (that is what runs a T4 out of memory), so
+the state vector Acts 6-8 measure distances between needed its own narrow service
+(`services/state_service.py`). It takes **token ids**, not text: the splice is made on ids,
+so spliced position `i+1+k` and original position `j+1+k` are the same token by
+construction; re-tokenising a rejoined string could move the join. Only the requested
+positions are reduced to float32 and moved off the device. The decoded splice is kept for
+the audit, and each cut records whether it re-tokenises to the same ids.
+
+### The corpus is streamed Wikipedia, not wikitext or NLTK
+The unit is a paragraph of 150-300 tokens with five or more sentences, in prose the model
+reads as written. wikitext, even the "raw" variant, is Moses-tokenised (`word ,`, `@-@`)
+and NLTK's Brown and Gutenberg corpora are pre-tokenised too, so all three would put a
+detokeniser between corpus and model. `wikimedia/wikipedia` streamed through `datasets` is
+untokenised with real paragraph breaks and downloads only the articles it consumes. The
+selected paragraphs are written to a JSONL next to the cache, so a re-run reads them back.
+A text or JSONL file is accepted for any other corpus. Contamination is not addressed: a
+0.6B model trained on 36T tokens has seen every public corpus.
+
+### Sentence-final only is the primary boundary; clause-final is stored, not compared
+Admissibility is meant to make the splice grammatical *by construction*. That holds for a
+sentence end joined to a sentence start, and it does not hold for comma-to-comma joins
+(list commas, appositives, `however,`), which would inflate the audit's failure rate for a
+rule the comparison does not use. Clause cuts (`, ; :` and dashes) are generated and cached
+under `boundary: "clause"` and summarised in `diagnostics.secondary_boundaries`; only
+sentence cuts enter `record["cuts"]`. The first sentence of a paragraph is never deletable
+(no boundary precedes it); no virtual boundary at BOS is invented.
+
+### Sentence ends come from punkt, mapped through tokenizer offsets, every rejection counted
+NLTK's punkt knows `Mr.` and `U.S.` are not sentence ends; a regex splitter exists for the
+offline tests only, and the record names which was used. Each sentence's last character is
+mapped to the token containing it; the position is kept only when that token ends exactly
+there, the sentence ends in `. ! ?` (plus closing quotes), and whitespace follows. Rejected
+ends are counted in the cache row rather than silently dropped.
+
+### Close / far are deciles within length-matching bins, not pooled deciles
+Divergence tracks deleted length (Spearman ~ +0.9) and so does endpoint distance (~ +0.65),
+so pooled deciles put every far cut in the long stratum and every close cut in the short one.
+Deciles within each stratum were the first fix, and a synthetic *null* corpus exposed a
+spurious 1.2x: inside a stratum of doubling width the far decile still deletes more than the
+close decile. Labels are therefore taken within `match_width`-token bins (default 10) inside
+each stratum, so close and far delete the same amount of text to within a bin; the
+per-stratum median deleted lengths are reported as the balance check. The pooled labels are
+kept as `pair_pooled` and reported under `pooled` with the warning the runbook asks for.
+
+### One stratified permutation test is the verdict; everything else is diagnostics
+"p < 0.05 within length strata" is made concrete as a single test: the statistic is the
+stratum-size-weighted mean of `log(median far / median close)` over strata with at least
+`min_per_group` cuts in both groups, and the null shuffles close / far labels within each
+matching bin, so the null keeps every bin's label counts. Per-stratum one-sided Mann-Whitney
+values are shown in the figure as detail. Cuts from one paragraph share its states, so the
+interval on the stratified ratio is a paragraph-level cluster bootstrap. The demo's residual
+analysis (Spearman after removing the log-length trend) is in `diagnostics.continuous`.
+
+### The pre-registration is the cache header
+Measure, window, boundary kinds, primary boundary, strata, decile and matching width are
+written as the first line of the cache before any cut is scored, and phase B reads them from
+there. Passing different strata or decile to `analyse_9a` is allowed and stamped into the
+record's notes as `DEVIATION`.
+
+### The audit is blind, stratified, and its failures are reported, not dropped
+The sheet holds 10 close, 10 far and 10 other admissible sentence cuts drawn with the run
+seed, shows the spliced text with the join marked and nothing numeric, and is filled by a
+person. Unaudited cuts carry `grammatical: true, audited: false`, so the two are never
+conflated; an audited failure is counted in `audit`, named in the verdict as a violation of
+the rule at that rate, excluded from every summary and drawn hollow by `fig_9a`. An existing
+sheet is never overwritten.
+
+### The exploratory extras are cheap, so they are kept
+Every cut stores its twenty per-position distances and the spliced text's fluency. The first
+allows a window-sensitivity check without a re-run; the second makes the "fluency and
+divergence disagree" point reproducible (`diagnostics.continuous.spearman_fluency_delta_div`).
+Neither enters the verdict.
+
+### `fig_9a` was edited, not vendored verbatim
+The runbook's figure printed a pooled Mann-Whitney in its title and cut strata at data
+tertiles, both of which the task text rules out. It now prints the stratified ratio, interval
+and permutation p when the record carries them, uses the record's pre-registered strata for
+panel B, and falls back to the original behaviour for a record without them, so the mock data
+and any older record still draw.
+
+---
+
 ## Storage
 
 ### JSON is the index; the `.npz` sidecar holds the bulk
@@ -411,4 +496,6 @@ Each of these is a real gap, listed so it is a decision rather than an oversight
 | **Cross-run comparison utilities** | Cosine similarity, layer-wise drift, projections. Deliberately out of scope for the extraction pipeline: its job is producing trustworthy, self-describing files. The experiments package is the exception, because a runbook task *is* an analysis with a fixed record schema. |
 | **Universal Dependencies gold** | `load_ud_conllu` is a stub. Subtree yields → spans, drop non-projective yields, and say so in the record's `treebank` field; not comparable with PTB numbers. |
 | **In-memory score cache** | Phase A de-duplicates variants per sentence and the JSONL is the cache; a dict of 700k texts would be memory for nothing. |
+| **Truncating the spliced sequence at `i + 1 + window`** | Under causal attention it would give identical states at two thirds of the compute, but the full spliced text is what yields the exploratory fluency for free, and phase A on 200 paragraphs is minutes on a T4 either way. |
+| **Task 9b (does the generated text survive, not only the state?)** | Needs a decoding protocol fixed in advance and a text-overlap measure; `fig_9b` is vendored and the cache holds every cut's ids, so it is a phase-B-plus-generation module away. |
 | **Streaming / incremental writes** | A run is held in memory and written once. For a very large corpus, an append-mode sink (JSONL + a growing `.npz`) satisfying `ResultSink` would be the change. |

@@ -2,8 +2,9 @@
 
 `Analyzer` is the only object the notebook needs. It wires the services
 together from one `RunConfig`, owns the loaded model for the session, and
-exposes `invoke` / `batch` / `save` (hidden states) and `score` (log-probabilities,
-when the model was loaded with its LM head). Services stay independently constructible --
+exposes `invoke` / `batch` / `save` (hidden states), `score` (log-probabilities) and
+`next_token_states` (full next-token vectors), the latter two when the model was loaded
+with its LM head. Services stay independently constructible --
 the container just does the wiring in one place, so swapping an implementation
 (a different sink, a remote model provider) is a one-line change here.
 """
@@ -13,10 +14,11 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 from .config.settings import ExtractionConfig, ModelConfig, RunConfig, StorageConfig
-from .domain.records import BatchResult, ExtractionRecord, RunManifest, ScoreResult, SentenceScore, WrittenPaths
+from .domain.records import BatchResult, ExtractionRecord, RunManifest, ScoreResult, SentenceScore, StateResult, WrittenPaths
 from .services.inference_service import InferenceService
 from .services.model_service import ModelService, library_versions
 from .services.scoring_service import LogProbService
+from .services.state_service import NextTokenStateService
 from .services.storage_service import StorageService, make_run_id
 from .utils.logging import get_logger
 from .utils.seeding import seed_everything
@@ -35,6 +37,7 @@ class Analyzer:
         inference_service: InferenceService | None = None,
         storage_service: StorageService | None = None,
         scoring_service: LogProbService | None = None,
+        state_service: NextTokenStateService | None = None,
     ):
         self.config = config or RunConfig()
         seed_everything(self.config.seed, strict=self.config.strict_determinism)
@@ -47,6 +50,10 @@ class Analyzer:
         self.scoring: LogProbService | None = scoring_service
         if self.scoring is None and self.config.model.head == "causal_lm":
             self.scoring = LogProbService(self.models, self.config.scoring)
+        #: Full next-token log-probability vectors (Task 9a); same head requirement.
+        self.states: NextTokenStateService | None = state_service
+        if self.states is None and self.config.model.head == "causal_lm":
+            self.states = NextTokenStateService(self.models, self.config.scoring)
 
     # ------------------------------------------------------------ constructors
 
@@ -116,6 +123,16 @@ class Analyzer:
 
     def score_one(self, text: str, **overrides: Any) -> SentenceScore:
         return self._scorer().score_one(text, **overrides)
+
+    def next_token_states(self, sequences: Sequence[Sequence[int]], positions: Sequence[Sequence[int]],
+                          **kwargs: Any) -> list[StateResult]:
+        """Next-token log-probability vectors at `positions` of each token sequence."""
+        if self.states is None:
+            raise RuntimeError(
+                "This Analyzer was built with head='base' (hidden states only). Next-token states "
+                "need the LM head: use Analyzer.for_scoring(model_id) or ModelConfig(head='causal_lm')."
+            )
+        return self.states.states(sequences, positions, **kwargs)
 
     def _scorer(self) -> LogProbService:
         if self.scoring is None:

@@ -11,9 +11,11 @@ microservices, driven from Google Colab notebooks.
 - **JSON out** — self-describing, with a lossless `.npz` sidecar when a run is large.
 - **`score(texts)`** — sentence log-probabilities (mean per token = the fluency of the
   teaching doc), when the model is loaded with its LM head.
-- **Experiments** — Task 1b (bracket induction from substitution costs) end to end:
-  treebank gold, span scoring with a resumable cache, induction, baselines, bootstrap
-  intervals, and the runbook's figure. See [Experiments](#experiments).
+- **`next_token_states(ids, positions)`** — the full next-token log-probability vector at
+  chosen positions, for state-distance experiments.
+- **Experiments** — Task 1b (bracket induction from substitution costs) and Task 9a
+  (omittability by splicing, length-matched, with a hand audit) end to end, each with a
+  resumable cache and the runbook's figure. See [Experiments](#experiments).
 
 ---
 
@@ -125,6 +127,42 @@ minus that of the variant; a BOS token prepended so every real token is predicte
 the sentence-level mean with a 95% bootstrap over sentences (corpus micro F1 in
 `diagnostics`). Use a **base** model: instruct tuning distorts raw-text likelihoods.
 
+`notebooks/experiment_9a.ipynb` runs **Task 9a — omittability by splicing** (Task 9 with its
+grammaticality control, at power). A cut `(i, j)` deletes the tokens strictly after `i`
+through `j` and rejoins the text; it is *admissible by construction* when both endpoints are
+sentence-final and `window` tokens follow `j`. The notebook streams ~200 Wikipedia paragraphs
+of 150–300 tokens, scores every admissible cut on `Qwen/Qwen3-0.6B-Base` (phase A, resumable;
+the cache header is the pre-registration: divergence measure, window, strata, decile, matching
+width), writes a 30-cut **audit sheet** you fill in by hand on text alone, then compares close
+and far endpoint pairs **within deleted-length strata** with labels matched on length (phase B),
+and draws `fig_9a`. Divergence tracks how much was deleted, so a pooled ratio is never the verdict.
+
+```python
+from m1_analyzer import Analyzer
+from m1_analyzer.experiments import (
+    analyse_9a, compute_splices, load_audit_csv, load_wikipedia_paragraphs, verdict_9a,
+    experiment_figures as EF,
+)
+
+analyzer   = Analyzer.for_scoring("Qwen/Qwen3-0.6B-Base")
+paragraphs = load_wikipedia_paragraphs(lambda t: len(analyzer.states.encode(t)), n=200, seed=42)
+header, rows = compute_splices(analyzer.states, paragraphs, window=20,       # phase A, cached + resumable
+                               cache_path="outputs/task_9a/splices.jsonl",
+                               provenance={"model_id": "Qwen/Qwen3-0.6B-Base"})
+audit  = load_audit_csv("outputs/task_9a/audit.csv")                          # after you fill it in
+record = analyse_9a(rows, header, audit=audit, model="Qwen/Qwen3-0.6B-Base")  # phase B
+print(verdict_9a(record))
+EF.fig_9a(record, path="outputs/task_9a/fig_9a.png")
+```
+
+What the numbers mean (all in the record): state = float32 log-softmax over the vocabulary;
+endpoint distance = L2 between the original text's states at `i` and `j`; divergence = median
+over `k < window` of the L2 between the spliced state at `i+1+k` and the original at `j+1+k`;
+close / far = bottom / top decile of endpoint distance within 10-token bins of deleted length,
+pooled across paragraphs; the estimate is the stratum-weighted far/close median ratio with a
+paragraph-level cluster-bootstrap interval; the p-value is a permutation test that shuffles labels
+within bins. Raw distances scale with the vocabulary size, so compare within one model only.
+
 ---
 
 ## Configuration
@@ -234,14 +272,16 @@ When a run exceeds `npy_threshold_floats` (1M by default), `values` becomes `nul
 ## Tests
 
 ```bash
-pytest -q                              # ~260 tests, fully offline, a few seconds
+pytest -q                              # ~310 tests, fully offline, under a minute
 python scripts/smoke_test.py --offline # end-to-end without the Hub
 ```
 
-The experiment analyses are tested against `m1_analyzer.testing.FakeSpanScorer`, a scorer
+The Task 1b analyses are tested against `m1_analyzer.testing.FakeSpanScorer`, a scorer
 that knows the gold tree, because the tiny model's word-level tokenizer cannot spell the
-proforms. The NLTK loader test is skipped until the corpus has been downloaded once
-(`python -c "import nltk; nltk.download('treebank')"`).
+proforms. The Task 9a pipeline runs on the tiny model itself (its vocabulary carries sentence
+punctuation) with the offline `regex` sentence splitter; the analysis is tested on synthetic
+caches with and without a planted effect. The NLTK loader test is skipped until the corpus has
+been downloaded once (`python -c "import nltk; nltk.download('treebank')"`).
 
 The suite builds a tiny random GPT-2 on disk and loads it through the same
 `from_pretrained` path a real model uses, so it needs no network and cannot be broken by a
