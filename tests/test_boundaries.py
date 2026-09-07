@@ -15,8 +15,13 @@ TEXT = 'The dog sat. He said "hello." Then, at 3:45, we left; the rest stayed. P
 
 
 def _offsets(text):
-    """Whitespace tokens with punctuation attached, like a BPE tokenizer's leading-space pieces."""
+    """Whitespace tokens with punctuation attached; offsets exclude the space (GPT-2 trims them)."""
     return [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+
+
+def _offsets_with_spaces(text):
+    """The same tokens with the leading space INSIDE the offset, as Qwen's tokenizer reports them."""
+    return [(m.start(), m.end()) for m in re.finditer(r"\s*\S+", text)]
 
 
 def test_regex_spans_cover_every_sentence():
@@ -31,6 +36,17 @@ def test_sentence_final_positions_map_to_the_closing_token():
     positions, rejected = sentence_final_positions(TEXT, offsets, "regex")
     assert [TEXT[offsets[p][0]:offsets[p][1]] for p in positions] == ["sat.", '"hello."', "stayed.", "units!"]
     assert rejected == 0
+
+
+def test_offsets_that_include_the_leading_space_still_find_every_boundary():
+    """Qwen reports ' The' as starting at the space; this rejected 6 of 7 sentence ends in
+    the first real run. The whitespace test must read the text, not the next offset."""
+    offsets = _offsets_with_spaces(TEXT)
+    positions, rejected = sentence_final_positions(TEXT, offsets, "regex")
+    assert [TEXT[offsets[p][0]:offsets[p][1]].strip() for p in positions] == ["sat.", '"hello."', "stayed.", "units!"]
+    assert rejected == 0
+    clause = clause_final_positions(TEXT, offsets, exclude=positions)
+    assert [TEXT[offsets[p][0]:offsets[p][1]].strip() for p in clause] == ["Then,", "3:45,", "left;"]
 
 
 def test_unpunctuated_and_straddling_ends_are_rejected_not_kept():
