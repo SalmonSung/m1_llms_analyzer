@@ -49,7 +49,7 @@ from .paragraphs import Paragraph
 
 log = get_logger("splice")
 
-SCHEMA = 1
+SCHEMA = 2
 TASK = "9a"
 DEFAULT_WINDOW = 20
 #: Deleted-segment length strata, ``[lo, hi)`` in tokens. Pre-registered in the header.
@@ -70,8 +70,18 @@ DISTANCE_MEASURE = (
     "L2 distance between the original text's next-token log-probability vectors at the two "
     "endpoint positions i and j"
 )
-#: Header fields that may differ between the writer and a resumer.
-_UNCHECKED_HEADER_KEYS = frozenset({"kind", "schema", "date", "n_paragraphs", "corpus"})
+#: Header fields that may differ between the writer and a resumer. `schema` is
+#: deliberately NOT among them: schema 2 tightened the boundary rule, so resuming
+#: a schema-1 cache would mix cuts generated under two different definitions of
+#: an admissible endpoint.
+_UNCHECKED_HEADER_KEYS = frozenset({"kind", "date", "n_paragraphs", "corpus"})
+
+#: What makes a position an admissible endpoint. Recorded in the header and
+#: compared on resume, so the rule a cache was built under is never in doubt.
+BOUNDARY_RULE = (
+    "sentence-final: terminal punctuation (+ closers), the token ends exactly there, whitespace "
+    "follows, AND the text after it begins a new sentence (right-side check, schema 2)"
+)
 
 
 @dataclass(frozen=True)
@@ -141,6 +151,7 @@ def preregistration(
         "divergence_measure": DIVERGENCE_MEASURE,
         "distance_measure": DISTANCE_MEASURE,
         "splitter": splitter,
+        "boundary_rule": BOUNDARY_RULE,
         "boundary_kinds": list(boundary_kinds),
         "primary_boundary": primary_boundary,
         "strata": edges,

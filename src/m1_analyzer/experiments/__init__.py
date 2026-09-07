@@ -9,7 +9,9 @@ audit. See notebooks/experiment_1b.ipynb and notebooks/experiment_9a.ipynb.
 """
 
 from . import experiment_figures
-from .boundaries import BOUNDARY_KINDS, CLAUSE, SENTENCE, SPLITTERS, boundary_positions, sentence_char_spans
+from .boundaries import (
+    BOUNDARY_KINDS, CLAUSE, SENTENCE, SPLITTERS, boundary_positions, sentence_char_spans, starts_sentence,
+)
 from .paragraphs import (
     WIKIPEDIA_NAME,
     Paragraph,
@@ -19,6 +21,7 @@ from .paragraphs import (
     select_paragraphs,
 )
 from .splice import (
+    BOUNDARY_RULE,
     DEFAULT_DECILE,
     DEFAULT_MATCH_WIDTH,
     DEFAULT_STRATA,
@@ -38,6 +41,7 @@ from .splice import (
 )
 from .task_9a import (
     analyse_9a,
+    boundary_check,
     apply_audit,
     assign_pairs,
     audit_sample,
@@ -86,6 +90,7 @@ from .treebank import (
 __all__ = [
     "experiment_figures",
     "BOUNDARY_KINDS", "CLAUSE", "SENTENCE", "SPLITTERS", "boundary_positions", "sentence_char_spans",
+    "starts_sentence", "BOUNDARY_RULE", "boundary_check",
     "WIKIPEDIA_NAME", "Paragraph", "hand_paragraphs", "load_paragraph_file", "load_wikipedia_paragraphs",
     "select_paragraphs",
     "DEFAULT_DECILE", "DEFAULT_MATCH_WIDTH", "DEFAULT_STRATA", "DEFAULT_WINDOW", "DIVERGENCE_MEASURE",

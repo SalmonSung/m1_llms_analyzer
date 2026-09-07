@@ -302,6 +302,28 @@ under `boundary: "clause"` and summarised in `diagnostics.secondary_boundaries`;
 sentence cuts enter `record["cuts"]`. The first sentence of a paragraph is never deletable
 (no boundary precedes it); no virtual boundary at BOS is invented.
 
+### A boundary is validated on both sides, because a cut uses it at both ends
+The first real run's hand audit found three endpoints that ended a sentence on the left but
+did not begin one on the right: `"... Vol." + "4 (1972) and its successors"` (punkt split on
+an abbreviation it does not know), `"... a monastery." + "at the court of the Frankish
+monarchy"` (the extractor dropped an italicised term, so the sentence starts lowercase), and
+`"... the Gallic Wars." + ", 39 volumes have been released"` (a dropped `As of <date>`
+template left the sentence headless). Only 12 of 1036 endpoints (1.2%), but **the defect is
+correlated with the exposure variable**: such a position is mid-sentence, so its state is
+atypical for a sentence end and therefore far from genuine ones — 13.5% of the far group
+touched one against 0.5% of the close group. That is a confound path straight to the
+hypothesis (false boundary → "far" label *and* a broken splice), so it is rejected by
+construction rather than left to a 30-cut audit to catch. `starts_sentence` skips whitespace
+and opening quotes, then requires a capital; a lowercase letter, a digit or punctuation means
+mid-sentence. Running out of text is fine (end of paragraph). Caseless scripts (CJK, Hebrew,
+Arabic) are accepted, having no capitalisation to test — the cost is that an all-lowercase
+corpus yields no usable boundary at all, which is the right refusal.
+
+On the run that motivated this, excluding the affected cuts moved the stratified ratio from
+1.8635 to 1.8557 — so it did *not* change that conclusion. The rule exists for the run where
+the effect is smaller, and because a control that is known to be broken should be fixed
+rather than argued around.
+
 ### Sentence ends come from punkt, mapped through tokenizer offsets, every rejection counted
 NLTK's punkt knows `Mr.` and `U.S.` are not sentence ends; a regex splitter exists for the
 offline tests only, and the record names which was used. Each sentence's last character is
@@ -328,11 +350,21 @@ values are shown in the figure as detail. Cuts from one paragraph share its stat
 interval on the stratified ratio is a paragraph-level cluster bootstrap. The demo's residual
 analysis (Spearman after removing the log-length trend) is in `diagnostics.continuous`.
 
-### The pre-registration is the cache header
-Measure, window, boundary kinds, primary boundary, strata, decile and matching width are
-written as the first line of the cache before any cut is scored, and phase B reads them from
-there. Passing different strata or decile to `analyse_9a` is allowed and stamped into the
+### The pre-registration is the cache header, and `schema` is part of it
+Measure, window, boundary kinds, primary boundary, strata, decile, matching width and the
+boundary rule are written as the first line of the cache before any cut is scored, and phase B
+reads them from there. `schema` is deliberately *not* in the unchecked set: schema 2 tightened
+the boundary rule, so a schema-1 cache holds endpoints selected under a different definition
+of admissible and resuming it would silently mix the two. Such a cache can still be *read* —
+`analyse_9a` reports its contamination in `diagnostics.boundary_check` and the verdict warns
+about it — it simply cannot be extended. Passing different strata or decile to `analyse_9a` is allowed and stamped into the
 record's notes as `DEVIATION`.
+
+### The audit stays, even though the rule now rejects the failure mode it found
+Tightening the boundary rule does not retire the audit: the audit is what found that gap, and
+an automated check can only test failure modes someone has already thought of. A changed rule
+also needs fresh evidence that it holds. `boundary_check` re-verifies the known failure mode on
+every run and the audit remains the instrument for the unknown ones.
 
 ### The audit is blind, stratified, and its failures are reported, not dropped
 The sheet holds 10 close, 10 far and 10 other admissible sentence cuts drawn with the run

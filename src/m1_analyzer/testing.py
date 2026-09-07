@@ -31,6 +31,9 @@ DEFAULT_VOCAB = [
     # Sentence punctuation, so the splice experiment (Task 9a) can find sentence
     # boundaries and re-tokenise a decoded splice on the tiny model.
     ".", ",", "!", "?",
+    # Capitalised openers: Task 9a's boundary rule requires the text after a
+    # sentence end to begin with a capital, so the fixtures need real ones.
+    "The", "A", "One", "Four", "Hello",
 ]
 
 
