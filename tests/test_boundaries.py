@@ -9,6 +9,7 @@ from m1_analyzer.experiments.boundaries import (
     clause_final_positions,
     sentence_char_spans,
     sentence_final_positions,
+    starts_sentence,
 )
 
 TEXT = 'The dog sat. He said "hello." Then, at 3:45, we left; the rest stayed. Prices rose 1,000 units!'
@@ -50,14 +51,27 @@ def test_offsets_that_include_the_leading_space_still_find_every_boundary():
 
 
 def test_unpunctuated_and_straddling_ends_are_rejected_not_kept():
-    text = "the dog sat. the cat ran"
+    text = "The dog sat. The cat ran"
     offsets = _offsets(text)
     positions, rejected = sentence_final_positions(text, offsets, "regex")
     assert positions == [2] and rejected == 1  # "ran" has no terminal punctuation
-    # A token that runs past the sentence end (here: one token covering "sat. the") is not a boundary.
+    # A token that runs past the sentence end (here: one token covering "sat. The") is not a boundary.
     straddle = [(0, 3), (4, 7), (8, 16), (17, 20), (21, 25)]
-    positions, rejected = sentence_final_positions("the dog sat. the cat ran.", straddle, "regex")
+    positions, rejected = sentence_final_positions("The dog sat. The cat ran.", straddle, "regex")
     assert positions == [4] and rejected == 1
+
+
+def test_an_all_lowercase_paragraph_yields_no_usable_boundary():
+    """The right-side rule needs a capital, so lowercase prose has no usable
+    endpoint. Deliberate: a corpus without capitalisation cannot be spliced safely.
+
+    The paragraph-final boundary survives -- nothing follows it to fail the test --
+    but it is unusable in a cut: it can never be `i` (no later boundary to pair
+    with) and never `j` (no window after it)."""
+    text = "the dog sat. the cat ran. the end."
+    positions, rejected = sentence_final_positions(text, _offsets(text), "regex")
+    assert positions == [7] and rejected == 2
+    assert text.__getitem__(slice(*_offsets(text)[7])) == "end."  # the paragraph-final token
 
 
 def test_clause_final_positions_skip_numbers_and_sentence_ends():
@@ -84,3 +98,49 @@ def test_punkt_is_named_when_missing_or_used_when_present():
         assert "punkt_tab" in str(exc)
     else:
         assert len(spans) == 2  # punkt knows "Dr." is not a sentence end
+
+
+# --------------------------------------------------------------- right-side rule
+
+
+def test_starts_sentence_accepts_a_real_start_and_rejects_the_three_audit_shapes():
+    assert starts_sentence('The dog sat. He ran.', 13)          # ordinary
+    assert starts_sentence('He said. "Yes." Then.', 9)          # opening quote
+    assert starts_sentence('It ended.', 9)                      # end of paragraph
+    assert starts_sentence('Ends. 日本語の文.', 6)               # caseless script: accepted
+    # the three failure shapes the Qwen audit turned up
+    assert not starts_sentence('... a monastery. at the court of the Frankish', 17)   # lowercase
+    assert not starts_sentence('... Vol. 4 (1972) and its successors', 9)             # stranded digit
+    assert not starts_sentence('... the Gallic Wars. , 39 volumes have been', 20)     # headless comma
+    assert not starts_sentence('Ends. "', 6)                                          # only an opener left
+
+
+def test_a_boundary_not_followed_by_a_sentence_start_is_rejected_and_counted():
+    """The defect that put 13.5% of the far group on mid-sentence endpoints."""
+    for text, kept in (
+        # punkt-style split after the abbreviation "Vol." strands a numeral
+        ("The band formed. Their albums Vol. 4 (1972) sold well. It ended.", ["formed.", "well.", "ended."]),
+        # a dropped "As of <date>" template leaves the next sentence headless
+        ("It was written. , 39 volumes have been released. The end.", ["released.", "end."]),
+    ):
+        offsets = _offsets(text)
+        positions, rejected = sentence_final_positions(text, offsets, "regex")
+        assert [text[offsets[p][0]:offsets[p][1]] for p in positions] == kept
+        assert rejected == 1, f"expected exactly one right-side rejection in {text!r}"
+
+
+def test_the_rejection_applies_to_both_offset_conventions():
+    text = "The band formed. Their albums Vol. 4 (1972) sold well."
+    for offsets in (_offsets(text), _offsets_with_spaces(text)):
+        positions, rejected = sentence_final_positions(text, offsets, "regex")
+        assert [text[offsets[p][0]:offsets[p][1]].strip() for p in positions] == ["formed.", "well."]
+        assert rejected == 1
+
+
+def test_clause_boundaries_are_not_subject_to_the_sentence_start_rule():
+    """A clause end is followed by lowercase BY DESIGN; the rule must not touch it."""
+    text = "Then, at noon, we left. It ended."
+    offsets = _offsets(text)
+    sentence, _ = sentence_final_positions(text, offsets, "regex")
+    clause = clause_final_positions(text, offsets, exclude=sentence)
+    assert [text[offsets[p][0]:offsets[p][1]] for p in clause] == ["Then,", "noon,"]

@@ -148,6 +148,12 @@ m1_llms_analyzer/
 │   │   │                          regex splitter, mapped through tokenizer offsets; every
 │   │   │                          rejected sentence end counted) and clause-final ones
 │   │   │                          (`, ; :` and dashes), the two boundary kinds a cut may join.
+│   │   │                          A boundary is validated on BOTH sides: the token ends a
+│   │   │                          sentence AND `starts_sentence` confirms the text after it
+│   │   │                          begins one, so a mid-sentence position (an abbreviation
+│   │   │                          punkt split on, a dropped wiki template) cannot serve as
+│   │   │                          an endpoint. Clause boundaries are exempt: they are
+│   │   │                          followed by lowercase by design.
 │   │   ├── paragraphs.py          Task 9a corpus: Paragraph, select_paragraphs (token-count
 │   │   │                          and sentence-count filter, seeded sample from a
 │   │   │                          source-order pool), Wikipedia streamed through
@@ -158,13 +164,19 @@ m1_llms_analyzer/
 │   │   │                          divergences div_k and their median, spliced fluency,
 │   │   │                          re-tokenisation check, join snippet), compute_splices
 │   │   │                          with the pre-registration as the cache header (measure,
-│   │   │                          window, strata, decile, matching width), load_splices.
+│   │   │                          window, strata, decile, matching width, boundary rule),
+│   │   │                          load_splices. `schema` is a CHECKED header field: a
+│   │   │                          schema-1 cache was built under the one-sided boundary
+│   │   │                          rule and must not be resumed under the two-sided one.
 │   │   └── task_9a.py             Task 9a phase B: close / far deciles within
 │   │                              length-matching bins inside each stratum, the audit
 │   │                              sample / CSV sheet / read-back, the stratified
 │   │                              permutation test, the paragraph-level cluster bootstrap,
-│   │                              pooled and continuous diagnostics, analyse_9a -> the
-│   │                              fig_9a record, validate_record, verdict.
+│   │                              pooled and continuous diagnostics, `boundary_check`
+│   │                              (re-verifies every stored endpoint and splits the
+│   │                              failures by close/far, since they concentrate in one
+│   │                              arm), analyse_9a -> the fig_9a record, validate_record,
+│   │                              verdict.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -322,7 +334,8 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
         │
         ├──▶ PHASE A (GPU)  experiments.splice.compute_splices(states, paragraphs, window, cache_path, ...)
         │        header = preregistration(measure, window, strata, decile, match_width)  written FIRST
-        │        per paragraph: boundaries (boundaries.py) -> admissible cuts (same type, window after j)
+        │        per paragraph: boundaries (boundaries.py, validated on both sides)
+        │          -> admissible cuts (same type, window after j)
         │          one pass of the original -> endpoint states + downstream states
         │          one pass per cut of ids[:i+1] + ids[j+1:] -> states at i+1..i+window
         │          d = |S_i - S_j|, div_k = |S'_{i+1+k} - S_{j+1+k}|, div = median_k, fl, retokenises
@@ -335,6 +348,7 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
                  labels: bottom / top decile of d within MATCH_WIDTH-token bins of each stratum
                  stratified ratio (weighted log median ratio) + permutation p (labels shuffled within bins)
                  paragraph-level cluster bootstrap CI; pooled and residual diagnostics; audit summary
+                 boundary_check: every stored endpoint re-verified, failures split by close/far
               ──▶ record (fig_9a schema + strata/stratified/pooled/audit) ──▶ experiment_figures.fig_9a ──▶ PNG
 ```
 

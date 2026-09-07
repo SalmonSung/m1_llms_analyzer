@@ -208,17 +208,22 @@ def load_wikipedia_paragraphs(count_tokens: Callable[[str], int], *, config: str
 def hand_paragraphs() -> list[Paragraph]:
     """Three small paragraphs for smoke tests: several short sentences each,
     spelled with the tiny test model's vocabulary so its word-level tokenizer
-    can read them (any real tokenizer reads them too)."""
+    can read them (any real tokenizer reads them too).
+
+    Sentences are capitalised because the boundary rule requires the text after
+    a sentence end to begin with a capital; an all-lowercase fixture would have
+    no admissible boundary at all.
+    """
     texts = [
-        "the quick brown fox jumps over the lazy dog. the dog jumps over the fox. "
-        "the fox jumps over the model. the model jumps over the layer. the layer jumps over the state. "
-        "the state jumps over the token. the token jumps over the text. the text jumps over the dog.",
-        "hello world. the quick fox jumps. the brown dog jumps. the lazy fox jumps over the dog. "
-        "one two three four five. the model jumps over the hidden state. the token jumps over the vector. "
-        "the vector jumps over the text. the text jumps over the world.",
-        "a b c. one two three. the quick brown fox jumps over the lazy dog. the lazy dog jumps over the quick fox. "
-        "four five one two. the model jumps over the layer. the hidden state jumps over the token. "
-        "the colab text jumps over the vector. the vector jumps over the model.",
+        "The quick brown fox jumps over the lazy dog. The dog jumps over the fox. "
+        "The fox jumps over the model. The model jumps over the layer. The layer jumps over the state. "
+        "The state jumps over the token. The token jumps over the text. The text jumps over the dog.",
+        "Hello world. The quick fox jumps. The brown dog jumps. The lazy fox jumps over the dog. "
+        "One two three four five. The model jumps over the hidden state. The token jumps over the vector. "
+        "The vector jumps over the text. The text jumps over the world.",
+        "A b c. One two three. The quick brown fox jumps over the lazy dog. The lazy dog jumps over the quick fox. "
+        "Four five one two. The model jumps over the layer. The hidden state jumps over the token. "
+        "The colab text jumps over the vector. The vector jumps over the model.",
     ]
     return [Paragraph(id=f"hand-{k}", text=t, source="hand", info={"index": k}) for k, t in enumerate(texts)]
 

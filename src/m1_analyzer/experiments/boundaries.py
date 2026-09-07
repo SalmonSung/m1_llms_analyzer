@@ -14,10 +14,29 @@ Sentence-final positions
     the tokenizer's offset mapping. The position is kept only when that token
     ends exactly at the sentence end (a token straddling two sentences is not a
     boundary), the sentence ends in ``. ! ?`` optionally followed by closing
-    quotes or brackets, and a whitespace *character* follows in the text. The
-    whitespace test reads the text, never the next token's offset: byte-level
-    BPE tokenizers (Qwen, GPT-2 with ``trim_offsets=False``) report ``" The"``
-    as starting at the space, so an offset comparison rejects every boundary.
+    quotes or brackets, a whitespace *character* follows in the text, and what
+    follows **begins a new sentence**. The whitespace test reads the text, never
+    the next token's offset: byte-level BPE tokenizers (Qwen, GPT-2 with
+    ``trim_offsets=False``) report ``" The"`` as starting at the space, so an
+    offset comparison rejects every boundary.
+
+    The last of those -- the *right-side* test -- exists because a splice uses a
+    boundary at both ends: the head must end a sentence AND the tail must resume
+    at one. A hand audit of a 200-paragraph Qwen run found three ways the
+    left-side tests alone let a mid-sentence position through:
+
+    * ``"... Vol." + "4 (1972) and its successors ..."`` -- punkt split on an
+      abbreviation it does not know, stranding a numeral;
+    * ``"... a monastery." + "at the court of the Frankish monarchy ..."`` -- the
+      corpus extractor dropped an italicised term, so the sentence starts lowercase;
+    * ``"... the Gallic Wars." + ", 39 volumes have been released"`` -- a dropped
+      ``As of <date>`` template left the next sentence headless.
+
+    Such a position is mid-sentence, so its state is atypical for a sentence end
+    and therefore *far* from genuine sentence-end states: in that run 13.5% of the
+    "far" group but only 0.5% of the "close" group touched one. The defect
+    correlates with the exposure variable, which is why it is rejected by
+    construction rather than left to the audit.
 
 Clause-final positions
     Tokens whose text ends in ``, ; :`` or a dash, followed by whitespace, that
@@ -90,6 +109,32 @@ def _regex_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def starts_sentence(text: str, pos: int) -> bool:
+    """Does the text from `pos` begin a new sentence?
+
+    Skips whitespace and opening quotes/brackets, then requires an uppercase
+    letter. A lowercase letter (a dropped word), a digit (a stranded ``Vol. 4``)
+    or punctuation (a headless ``, 39 volumes``) means `pos` is mid-sentence.
+    Running out of text is fine -- that is the end of the paragraph, not a
+    broken sentence. A caseless script (CJK, Hebrew, Arabic) is accepted, since
+    it carries no capitalisation to test.
+    """
+    tail = text[pos:].lstrip()
+    if not tail:
+        return True
+    k = 0
+    while k < len(tail) and tail[k] in OPENERS:
+        k += 1
+    if k >= len(tail):
+        return False
+    char = tail[k]
+    if char.isupper():
+        return True
+    if char.islower() or char.isdigit() or not char.isalnum():
+        return False
+    return True
+
+
 def _token_at(offsets: Sequence[tuple[int, int]], char: int) -> int | None:
     for t, (s, e) in enumerate(offsets):
         if s <= char < e:
@@ -122,6 +167,9 @@ def sentence_final_positions(
             continue
         if last + 1 < len(text) and not text[last + 1].isspace():
             rejected += 1  # no whitespace between the sentences: a doubtful split
+            continue
+        if not starts_sentence(text, last + 1):
+            rejected += 1  # what follows does not begin a sentence: `last` is mid-sentence
             continue
         positions.append(t)
     return positions, rejected

@@ -56,7 +56,7 @@ import numpy as np
 from scipy import stats
 
 from ..utils.logging import get_logger
-from .boundaries import SENTENCE
+from .boundaries import SENTENCE, starts_sentence
 from .splice import DEFAULT_DECILE, DEFAULT_MATCH_WIDTH, DEFAULT_STRATA, DIVERGENCE_MEASURE
 
 log = get_logger("task_9a")
@@ -246,6 +246,66 @@ def apply_audit(cuts: Sequence[dict[str, Any]], audit: Mapping[str, tuple[bool, 
             c["audited"] = True
         else:
             c["grammatical"], c["audit_note"], c["audited"] = True, "", False
+
+
+def boundary_check(rows: Sequence[Mapping[str, Any]], cuts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Do the cache's sentence endpoints actually sit at sentence boundaries?
+
+    Zero for any cache written under schema 2, whose boundary rule rejects a
+    position that is not followed by a sentence start. A non-zero count means the
+    cache predates that rule, and the count is *not* evenly spread: such a
+    position is mid-sentence, so its state is atypical for a sentence end and
+    lands in the FAR decile far more often than the close one (13.5% vs 0.5% on
+    the 200-paragraph Qwen run that motivated the rule). Read ``close`` and
+    ``far`` here before reading the ratio: contamination concentrated in one arm
+    inflates it in the direction of the hypothesis.
+
+    ``n_cuts_affected`` counts cuts touching such a position at either endpoint --
+    a bad head leaves the splice ending mid-sentence just as a bad tail leaves it
+    resuming mid-sentence.
+    """
+    text_of = {r["id"]: r["text"] for r in rows}
+    bad: set[tuple[str, int]] = set()
+    checked = 0
+    for r in rows:
+        char_of: dict[int, int] = {}
+        for c in r["cuts"]:
+            if c["boundary"] != SENTENCE:
+                continue
+            char_of[c["i"]] = c["char_i"]
+            char_of[c["j"]] = c["char_j"]
+        for token, char in char_of.items():
+            checked += 1
+            if not starts_sentence(r["text"], char):
+                bad.add((r["id"], token))
+
+    def touches(c: Mapping[str, Any]) -> bool:
+        return (c["paragraph"], c["i"]) in bad or (c["paragraph"], c["j"]) in bad
+
+    sentence_cuts = [c for c in cuts if c["boundary"] == SENTENCE]
+    by_pair = {}
+    for name in (CLOSE, FAR):
+        group = [c for c in sentence_cuts if c["pair"] == name]
+        hit = sum(touches(c) for c in group)
+        by_pair[name] = {"n": len(group), "affected": hit,
+                         "rate": _r(hit / len(group)) if group else float("nan")}
+    examples = []
+    for pid, token in sorted(bad)[:5]:
+        char = next(c["char_i"] if c["i"] == token else c["char_j"]
+                    for r in rows if r["id"] == pid
+                    for c in r["cuts"] if c["boundary"] == SENTENCE and token in (c["i"], c["j"]))
+        examples.append({"paragraph": pid, "token": token,
+                         "before": text_of[pid][max(0, char - 40):char],
+                         "after": text_of[pid][char:char + 40]})
+    return {
+        "n_endpoints_checked": checked,
+        "n_endpoints_not_followed_by_a_sentence": len(bad),
+        "n_cuts_affected": sum(touches(c) for c in sentence_cuts),
+        "n_cuts": len(sentence_cuts),
+        "by_pair": by_pair,
+        "examples": examples,
+        "clean": not bad,
+    }
 
 
 # ----------------------------------------------------------- statistics
@@ -546,6 +606,7 @@ def analyse_9a(
             "n_not_retokenising": sum(1 for c in cuts if not c.get("retokenises", True)),
             "n_rejected_boundaries": int(sum(r.get("n_rejected_boundaries", 0) for r in rows)),
             "seg_len_range": [int(min(c["seg_len"] for c in primary)), int(max(c["seg_len"] for c in primary))] if primary else None,
+            "boundary_check": boundary_check(rows, primary),
             "continuous": continuous,
             "secondary_boundaries": secondary,
             "preregistration": {k: v for k, v in header.items() if k != "kind"},
@@ -613,6 +674,18 @@ def verdict(record: Mapping[str, Any]) -> str:
         lines.append(f"Spearman(deleted tokens, divergence) = {cont['spearman_seg_div']:+.2f}, "
                      f"(endpoint distance, divergence) = {cont.get('spearman_dist_div', float('nan')):+.2f}, "
                      f"(deleted tokens, endpoint distance) = {cont.get('spearman_seg_dist', float('nan')):+.2f}.")
+    bc = record.get("diagnostics", {}).get("boundary_check", {})
+    if bc and not bc.get("clean", True):
+        close_rate = bc["by_pair"][CLOSE]["rate"]
+        far_rate = bc["by_pair"][FAR]["rate"]
+        lines.append(
+            f"WARNING: {bc['n_endpoints_not_followed_by_a_sentence']}/{bc['n_endpoints_checked']} endpoints are "
+            f"not followed by a sentence start, affecting {bc['n_cuts_affected']}/{bc['n_cuts']} cuts "
+            f"({close_rate:.1%} of close, {far_rate:.1%} of far). This cache predates the schema-2 boundary "
+            "rule; contamination concentrated in the far arm inflates the ratio. Re-run phase A, or exclude "
+            "them via the audit and report the sensitivity."
+        )
+
     audit = record.get("audit", {})
     if audit.get("n_audited"):
         if audit["n_failed"]:
