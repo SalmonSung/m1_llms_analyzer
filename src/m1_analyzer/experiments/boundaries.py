@@ -14,7 +14,10 @@ Sentence-final positions
     the tokenizer's offset mapping. The position is kept only when that token
     ends exactly at the sentence end (a token straddling two sentences is not a
     boundary), the sentence ends in ``. ! ?`` optionally followed by closing
-    quotes or brackets, and whitespace separates it from the next token.
+    quotes or brackets, and a whitespace *character* follows in the text. The
+    whitespace test reads the text, never the next token's offset: byte-level
+    BPE tokenizers (Qwen, GPT-2 with ``trim_offsets=False``) report ``" The"``
+    as starting at the space, so an offset comparison rejects every boundary.
 
 Clause-final positions
     Tokens whose text ends in ``, ; :`` or a dash, followed by whitespace, that
@@ -117,7 +120,7 @@ def sentence_final_positions(
         if t is None or offsets[t][1] != last + 1:
             rejected += 1
             continue
-        if t + 1 < len(offsets) and offsets[t + 1][0] == last + 1:
+        if last + 1 < len(text) and not text[last + 1].isspace():
             rejected += 1  # no whitespace between the sentences: a doubtful split
             continue
         positions.append(t)
@@ -136,7 +139,8 @@ def clause_final_positions(
         piece = text[s:e].rstrip()
         if not piece or not piece.endswith(CLAUSE_PUNCT):
             continue
-        if t + 1 < len(offsets) and offsets[t + 1][0] == s + len(piece):
+        after = s + len(piece)
+        if after < len(text) and not text[after].isspace():
             continue  # "1,000" or "3:45": not a clause end
         positions.append(t)
     return positions
