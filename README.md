@@ -140,7 +140,7 @@ and draws `fig_9a`. Divergence tracks how much was deleted, so a pooled ratio is
 ```python
 from m1_analyzer import Analyzer
 from m1_analyzer.experiments import (
-    analyse_9a, compute_splices, load_audit_csv, load_wikipedia_paragraphs, verdict_9a,
+    add_surprisal, analyse_9a, compute_splices, load_audit_csv, load_wikipedia_paragraphs, verdict_9a,
     experiment_figures as EF,
 )
 
@@ -149,6 +149,8 @@ paragraphs = load_wikipedia_paragraphs(lambda t: len(analyzer.states.encode(t)),
 header, rows = compute_splices(analyzer.states, paragraphs, window=20,       # phase A, cached + resumable
                                cache_path="outputs/task_9a/splices.jsonl",
                                provenance={"model_id": "Qwen/Qwen3-0.6B-Base"})
+header, rows, report = add_surprisal(analyzer.states, "outputs/task_9a/splices.jsonl")  # additive: per-token
+print(report["n_bad_paragraph_length"], report["max_abs_mean_all_minus_fluency"])       # surprisal, del_surp per cut
 audit  = load_audit_csv("outputs/task_9a/audit.csv")                          # after you fill it in
 record = analyse_9a(rows, header, audit=audit, model="Qwen/Qwen3-0.6B-Base")  # phase B
 print(verdict_9a(record))
@@ -162,6 +164,13 @@ close / far = bottom / top decile of endpoint distance within 10-token bins of d
 pooled across paragraphs; the estimate is the stratum-weighted far/close median ratio with a
 paragraph-level cluster-bootstrap interval; the p-value is a permutation test that shuffles labels
 within bins. Raw distances scale with the vocabulary size, so compare within one model only.
+`surprisal[t] = -log p(ids[t] | ids[:t])` in nats, from the same original-text pass and the same
+float32 log-softmax as the states (token `t` is read from the state at position `t-1`; token 0 from
+the BOS row); `del_surp` is its sum over the deleted tokens `i+1..j` and `del_surp_mean` that sum
+over `seg_len` -- a second matching variable, so close and far can be matched on information as
+well as length. A paragraph's `fluency` is the mean of `surprisal` over **all** tokens, token 0
+included, so `mean(surprisal)` reproduces it and `mean(surprisal[1:])` does not. `add_surprisal`
+fills these into an existing cache without changing any other byte, and reports both invariants.
 
 ---
 

@@ -162,12 +162,21 @@ m1_llms_analyzer/
 │   │   │                          `window` tokens after j), splice_ids / splice_text,
 │   │   │                          score_paragraph (endpoint distance d, per-position
 │   │   │                          divergences div_k and their median, spliced fluency,
-│   │   │                          re-tokenisation check, join snippet), compute_splices
+│   │   │                          re-tokenisation check, join snippet, and del_surp /
+│   │   │                          del_surp_mean: the deleted span's summed surprisal in its
+│   │   │                          original context, from the per-paragraph `surprisal`
+│   │   │                          list the same original pass yields), compute_splices
 │   │   │                          with the pre-registration as the cache header (measure,
-│   │   │                          window, strata, decile, matching width, boundary rule),
-│   │   │                          load_splices. `schema` is a CHECKED header field: a
-│   │   │                          schema-1 cache was built under the one-sided boundary
-│   │   │                          rule and must not be resumed under the two-sided one.
+│   │   │                          window, strata, decile, matching width, boundary rule,
+│   │   │                          surprisal measure), load_splices, add_surprisal (fills
+│   │   │                          surprisal / del_surp into an EXISTING cache: one pass per
+│   │   │                          paragraph, new keys appended last, every old byte kept,
+│   │   │                          atomic rewrite, no-op when complete), check_surprisal
+│   │   │                          (the two invariants: lengths, and mean(surprisal) vs
+│   │   │                          fluency over all tokens and over [1:]). `schema` is a
+│   │   │                          CHECKED header field: a schema-1 cache was built under
+│   │   │                          the one-sided boundary rule and must not be resumed
+│   │   │                          under the two-sided one.
 │   │   └── task_9a.py             Task 9a phase B: close / far deciles within
 │   │                              length-matching bins inside each stratum, the audit
 │   │                              sample / CSV sheet / read-back, the stratified
@@ -175,8 +184,11 @@ m1_llms_analyzer/
 │   │                              pooled and continuous diagnostics, `boundary_check`
 │   │                              (re-verifies every stored endpoint and splits the
 │   │                              failures by close/far, since they concentrate in one
-│   │                              arm), analyse_9a -> the fig_9a record, validate_record,
-│   │                              verdict.
+│   │                              arm), analyse_9a -> the fig_9a record (record cuts carry
+│   │                              del_surp / del_surp_mean and `continuous` the partial
+│   │                              Spearman of d vs div given log length AND del_surp when
+│   │                              the cache has the field; nothing else moves without it),
+│   │                              validate_record, verdict.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -248,7 +260,9 @@ m1_llms_analyzer/
     │                              text and JSONL sources.
     ├── test_splice.py             Admissible cuts, splicing on ids and text, one cut
     │                              recomputed by hand from the state service, resume,
-    │                              the pre-registration guard, truncated-line repair.
+    │                              the pre-registration guard, truncated-line repair,
+    │                              surprisal from the same pass (mean == fluency over all
+    │                              tokens), add_surprisal byte-identical and idempotent.
     ├── test_task_9a.py            Labels within matching bins, a planted effect passes and
     │                              a null fails, the pooled confound, the permutation test,
     │                              the audit round trip with failures excluded, deviations
@@ -339,7 +353,14 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
         │          one pass of the original -> endpoint states + downstream states
         │          one pass per cut of ids[:i+1] + ids[j+1:] -> states at i+1..i+window
         │          d = |S_i - S_j|, div_k = |S'_{i+1+k} - S_{j+1+k}|, div = median_k, fl, retokenises
+        │          surprisal[t] = -log p(ids[t] | ids[:t]) from that same original pass; per cut
+        │          del_surp = sum(surprisal[i+1..j]), del_surp_mean = del_surp / seg_len
         │     ──▶ outputs/task_9a/splices_<model>_<corpus>_w<window>.jsonl   (append, fsync, resume)
+        │
+        ├──▶ PHASE A' (GPU, additive)  experiments.splice.add_surprisal(states, cache_path)
+        │        one pass per paragraph on the ORIGINAL ids for rows that lack `surprisal`; new keys
+        │        appended last, every old byte kept, atomic rewrite; check_surprisal reports the
+        │        two invariants (lengths; mean(surprisal) == fluency over all tokens, not over [1:])
         │
         ├──▶ AUDIT  task_9a.assign_pairs -> audit_sample(10 close, 10 far, 10 other) -> write_audit_csv
         │        a person fills `grammatical` (y/n) on text alone -> load_audit_csv
