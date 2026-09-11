@@ -33,7 +33,9 @@ Record (the schema `experiment_figures.fig_9a` draws, plus extras)::
     {"cuts": [{"pair": "close"|"far", "grammatical": bool, "seg_len": int,
                "divergence": float, "audited": bool, "paragraph": str, "i": int,
                "j": int, "boundary": str, "endpoint_distance": float,
-               "stratum": str, "fluency": float}, ...],
+               "stratum": str, "fluency": float,
+               "del_surp": float, "del_surp_mean": float   # when the cache carries them
+              }, ...],
      "divergence_measure": str, "window": int,
      "strata": [{"label", "lo", "hi", "n_close", "n_far", "median_close",
                  "median_far", "ratio", "p_mannwhitney", "n_total"}, ...],
@@ -57,7 +59,7 @@ from scipy import stats
 
 from ..utils.logging import get_logger
 from .boundaries import SENTENCE, starts_sentence
-from .splice import DEFAULT_DECILE, DEFAULT_MATCH_WIDTH, DEFAULT_STRATA, DIVERGENCE_MEASURE
+from .splice import DEFAULT_DECILE, DEFAULT_MATCH_WIDTH, DEFAULT_STRATA, DIVERGENCE_MEASURE, check_surprisal
 
 log = get_logger("task_9a")
 
@@ -532,6 +534,20 @@ def analyse_9a(
         fl = np.array([c["fl"] - (c["paragraph_fluency"] or np.nan) for c in gram], float)
         if np.isfinite(fl).all():
             continuous["spearman_fluency_delta_div"] = _r(_spearman(fl, div))
+    # Deleted-segment surprisal as a second matching variable (additive: only when the
+    # cache carries it). The partial correlation controls for BOTH log length and the
+    # information the deleted span held; if it survives, endpoint distance carries
+    # something beyond "more information deleted, more changed".
+    if len(gram) >= 4 and all("del_surp" in c for c in gram):
+        del_surp = np.array([c["del_surp"] for c in gram], float)
+        continuous["spearman_del_surp_div"] = _r(_spearman(del_surp, div))
+        continuous["spearman_del_surp_seg"] = _r(_spearman(del_surp, seg))
+        continuous["spearman_del_surp_dist"] = _r(_spearman(del_surp, dist))
+        if np.ptp(seg) > 0 and np.ptp(del_surp) > 0:
+            X2 = np.column_stack([np.ones_like(seg), np.log(seg), del_surp])
+            r_div = div - X2 @ np.linalg.lstsq(X2, div, rcond=None)[0]
+            r_dist = dist - X2 @ np.linalg.lstsq(X2, dist, rcond=None)[0]
+            continuous["partial_spearman_dist_div_given_logseg_del_surp"] = _r(_spearman(r_dist, r_div))
 
     audited = [c for c in cuts if c["audited"]]
     failed = [c for c in audited if not c["grammatical"]]
@@ -558,12 +574,16 @@ def analyse_9a(
     record_cuts = []
     for c in labelled:
         lo, hi = strata[c["stratum"]]
-        record_cuts.append({
+        entry = {
             "pair": c["pair"], "grammatical": bool(c["grammatical"]), "seg_len": int(c["seg_len"]),
             "divergence": float(c["div"]), "audited": bool(c["audited"]), "paragraph": c["paragraph"],
             "i": int(c["i"]), "j": int(c["j"]), "boundary": c["boundary"], "endpoint_distance": float(c["d"]),
             "stratum": stratum_label(lo, hi), "fluency": float(c["fl"]),
-        })
+        }
+        if "del_surp" in c:  # same names as the cache, so the cut joins back without a rename table
+            entry["del_surp"] = float(c["del_surp"])
+            entry["del_surp_mean"] = float(c["del_surp_mean"])
+        record_cuts.append(entry)
 
     usable = [s for s in strata_rows if s["usable"]]
     note_parts = [
@@ -613,6 +633,8 @@ def analyse_9a(
             "seed": seed,
         },
     }
+    if any("surprisal" in r for r in rows):
+        record["diagnostics"]["surprisal"] = check_surprisal(rows)
     validate_record(record)
     return record
 

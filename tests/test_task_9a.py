@@ -249,3 +249,41 @@ def test_a_contaminated_cache_says_so_in_the_verdict():
         "examples": []}))
     text = verdict(dirty)
     assert "WARNING" in text and "0.5% of close" in text and "13.5% of far" in text
+
+
+# ------------------------------------------------------------------ surprisal
+
+
+def test_record_cuts_carry_del_surp_when_the_cache_has_it():
+    """The deleted-segment surprisal rides along additively: with it, every record cut and
+    the continuous diagnostics gain fields; without it nothing that existed moves."""
+    rows = synthetic_rows(0.5, seed=2)
+    base = analyse_9a(rows, HEADER, model="synthetic", n_perm=200, n_boot=100)
+    assert "del_surp" not in base["cuts"][0] and "surprisal" not in base["diagnostics"]
+    assert "partial_spearman_dist_div_given_logseg_del_surp" not in base["diagnostics"]["continuous"]
+
+    rng = np.random.default_rng(0)
+    for r in rows:
+        r["surprisal"] = [round(float(x), 6) for x in rng.gamma(2.0, 1.5, size=r["n_tokens"])]
+        for c in r["cuts"]:
+            span = r["surprisal"][c["i"] + 1: c["j"] + 1]
+            assert len(span) == c["seg_len"]
+            c["del_surp"] = round(sum(span), 6)
+            c["del_surp_mean"] = round(sum(span) / c["seg_len"], 6)
+    record = analyse_9a(rows, HEADER, model="synthetic", n_perm=200, n_boot=100)
+    validate_record(record)
+    assert all("del_surp" in c and "del_surp_mean" in c for c in record["cuts"])
+    cut = record["cuts"][0]
+    assert cut["del_surp_mean"] == pytest.approx(cut["del_surp"] / cut["seg_len"], abs=1e-5)
+    cont = record["diagnostics"]["continuous"]
+    assert -1.0 <= cont["partial_spearman_dist_div_given_logseg_del_surp"] <= 1.0
+    assert cont["spearman_del_surp_seg"] > 0.9  # a sum over the span grows with its length
+    surp = record["diagnostics"]["surprisal"]
+    assert surp["n_with_surprisal"] == 100 and surp["n_bad_paragraph_length"] == 0 and surp["n_bad_cut_length"] == 0
+    assert surp["max_abs_del_surp_minus_sum"] < 1e-5
+    # Everything that existed before is byte-for-byte what it was.
+    for key in ("stratified", "pooled", "strata"):
+        assert record[key] == base[key]
+    for key, value in base["diagnostics"]["continuous"].items():
+        assert cont[key] == value
+    assert [{k: v for k, v in c.items() if k not in ("del_surp", "del_surp_mean")} for c in record["cuts"]] == base["cuts"]
