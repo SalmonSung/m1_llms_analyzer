@@ -42,12 +42,19 @@ m1_llms_analyzer/
 │   │                              bootstrap, then smoke test -> treebank -> model ->
 │   │                              one-sentence walkthrough -> phase A scoring (resumable)
 │   │                              -> phase B analysis -> fig_1b / fig_0c -> Drive.
-│   └── experiment_9a.ipynb        Task 9a (omittability by splicing, length-matched, with
-│                                  the hand audit): same bootstrap, smoke test -> model ->
-│                                  Wikipedia paragraphs -> one-paragraph walkthrough ->
-│                                  phase A splice scoring (resumable, pre-registered
-│                                  header) -> audit sheet out / back in -> phase B
-│                                  stratified analysis -> fig_9a -> Drive.
+│   ├── experiment_9a.ipynb        Task 9a (omittability by splicing, length-matched, with
+│   │                              the hand audit): same bootstrap, smoke test -> model ->
+│   │                              Wikipedia paragraphs -> one-paragraph walkthrough ->
+│   │                              phase A splice scoring (resumable, pre-registered
+│   │                              header) -> audit sheet out / back in -> phase B
+│   │                              stratified analysis -> fig_9a -> Drive.
+│   └── experiment_9b.ipynb        Task 9b (does the deletion change what the model
+│                                  WRITES?): same bootstrap, smoke test -> model -> the 9a
+│                                  cache + record restored from Drive (read-only) ->
+│                                  one-cut walkthrough -> phase A generation (true-
+│                                  continuation log-probs + paired nucleus samples per
+│                                  labelled cut, resumable, protocol + input sha256 in the
+│                                  header) -> the record and its three invariants -> Drive.
 │
 ├── src/m1_analyzer/
 │   ├── __init__.py                Public API surface: re-exports Analyzer, configs, records.
@@ -177,7 +184,7 @@ m1_llms_analyzer/
 │   │   │                          CHECKED header field: a schema-1 cache was built under
 │   │   │                          the one-sided boundary rule and must not be resumed
 │   │   │                          under the two-sided one.
-│   │   └── task_9a.py             Task 9a phase B: close / far deciles within
+│   │   ├── task_9a.py             Task 9a phase B: close / far deciles within
 │   │                              length-matching bins inside each stratum, the audit
 │   │                              sample / CSV sheet / read-back, the stratified
 │   │                              permutation test, the paragraph-level cluster bootstrap,
@@ -189,6 +196,30 @@ m1_llms_analyzer/
 │   │                              Spearman of d vs div given log length AND del_surp when
 │   │                              the cache has the field; nothing else moves without it),
 │   │                              validate_record, verdict.
+│   │   ├── decoding.py            Continuations from the loaded LM, task-agnostic:
+│   │   │                          sample_continuations (nucleus top-p / temperature, all K
+│   │   │                          rows drawn together from a per-call torch.Generator so two
+│   │   │                          calls with one seed are paired; EOS an ordinary token;
+│   │   │                          fixed length; KV cache, with a re-feed-everything oracle),
+│   │   │                          greedy_continuation (same loop, argmax), nucleus_filter,
+│   │   │                          token_f1 (multiset F1 over ids), first_diff, overlap_stats
+│   │   │                          (within / cross / cross-within, collapsed flag).
+│   │   └── task_9b.py             Task 9b: GenerationProtocol (W_true, K, L, top-p, T, seed
+│   │                              base; the cache header), load_9a_inputs (record + cache,
+│   │                              read-only, sha256-stamped), cut_specs (the record's
+│   │                              labelled cuts in order = cut_index), measure_a (the
+│   │                              author's next W tokens under the original and the spliced
+│   │                              context: lp_orig from a fresh original pass, lp_spl from
+│   │                              one spliced pass, the cached surprisal as the invariant),
+│   │                              measure_b (paired samples from O = ids[:j+1] and
+│   │                              S = ids[:i+1], token-F1 within / cross, greedy first
+│   │                              difference), score_cut, compute_generation_9b (one
+│   │                              fsynced JSONL line per cut, resumable; a different
+│   │                              protocol or 9a input refuses), load_generation_9b,
+│   │                              check_invariants_9b (cached surprisal reproduces lp_orig;
+│   │                              keys match the 9a record in order; within > 0),
+│   │                              build_record_9b, validate_record_9b. No analysis: the
+│   │                              pre-registered test is run from the record elsewhere.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -267,6 +298,15 @@ m1_llms_analyzer/
     │                              a null fails, the pooled confound, the permutation test,
     │                              the audit round trip with failures excluded, deviations
     │                              recorded, the real and mock fig_9a.
+    ├── test_decoding.py           Multiset token F1, the nucleus filter by hand, greedy ==
+    │                              full recompute == argmax of the state service, sampling
+    │                              seeded / paired / bounded / global-RNG-free, the length
+    │                              guard, overlap_stats against a double loop.
+    ├── test_task_9b.py            Measure A against the state service and the cached
+    │                              surprisal, the generation cache (order, resume without
+    │                              generating, protocol and source-record guards, truncated
+    │                              line, dry run, the 9a files byte-unchanged), the record
+    │                              shape, the invariants, validation, EOS as an ordinary token.
     └── test_architecture_doc.py   Fails if this file omits any source file.
 ```
 
@@ -373,6 +413,39 @@ container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
               ──▶ record (fig_9a schema + strata/stratified/pooled/audit) ──▶ experiment_figures.fig_9a ──▶ PNG
 ```
 
+## How an experiment flows (Task 9b)
+
+```
+notebooks/experiment_9b.ipynb
+        │  RunConfig(model=ModelConfig(head="causal_lm"))   -- same MODEL_ID / dtype / BOS policy as the 9a cache
+        ▼
+container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM)
+        │           ──▶ NextTokenStateService (analyzer.states)     ModelService is the sampler's provider
+        │
+        ├──▶ experiments.task_9b.load_9a_inputs(record_9a, splices cache)     READ-ONLY, sha256 of both stamped
+        │        record["cuts"] = the labelled close / far cuts, in order -> cut_index; cache rows -> text, surprisal
+        │
+        ├──▶ PHASE A (GPU)  experiments.task_9b.compute_generation_9b(states, provider, record, cache, cache_path, protocol)
+        │        header = GenerationProtocol + source sha256 + model, written FIRST; resume refuses a changed field
+        │        per cut (i, j): ids = encode(text) (must re-encode to n_tokens); spliced = ids[:i+1] + ids[j+1:]
+        │          A: lp_orig[k] = log p(ids[j+1+k] | ids[:j+1+k])   one original pass per paragraph, memoised
+        │             lp_spl[k]  = log p(spliced[i+1+k] | ...)        one spliced pass;  true_dlogp = mean(lp_orig - lp_spl)
+        │             |lp_orig + cached surprisal| kept per cut (invariant 1)
+        │          B: K samples x L tokens from O = ids[:j+1] and S = ids[:i+1]   decoding.sample_continuations,
+        │             nucleus p / T, torch.Generator seeded seed_base + cut_index, the SAME seed for O and S
+        │             within = mean F1 over O-O pairs, cross = mean over O-S pairs, sample_overlap = cross / within
+        │          greedy from O and S -> first_diff_greedy (descriptive)
+        │     ──▶ outputs/task_9b/gen_9b_<model>_<corpus>_w<window>.jsonl   (one line per cut, fsync, resume, Drive mirror)
+        │
+        └──▶ PHASE A' (CPU)  experiments.task_9b.build_record_9b(header, rows, record_9a)
+                 check_invariants_9b: (1) max |lp_orig + surprisal|  (2) keys == record cuts, in order  (3) within > 0
+              ──▶ record_9b_<...>.json  {cuts (requested + additive fields), protocol, meta, invariants, source}
+```
+
+The 9a cache and record are inputs only; nothing writes to them. The pre-registered analysis
+(far vs close on `true_dlogp` and `sample_overlap` within 9a's length strata, Spearman with
+`state_div`) is deliberately not in this repository: it is run from the record.
+
 ## Layer indexing convention
 
 `output_hidden_states=True` returns `num_hidden_layers + 1` tensors:
@@ -397,5 +470,6 @@ for and the resolved absolute index, so a saved result is never ambiguous.
 | Remote/HTTP model host | New class satisfying `ModelProvider`; nothing else changes |
 | A new experiment task | New `experiments/task_<id>.py` producing the record its `fig_<id>` docstring specifies; reuse `treebank.py`, `spans.py`, `span_costs.py`, `stats.py`, `jsonl_cache.py`; a notebook copied from `experiment_1b.ipynb` or `experiment_9a.ipynb` |
 | A state-level experiment (distances between next-token vectors) | `NextTokenStateService.states(ids, positions)` via `analyzer.states`; see `experiments/splice.py` for the alignment bookkeeping |
+| A generation experiment (text after a context) | `experiments/decoding.py` (`sample_continuations`, `greedy_continuation`, `token_f1`) with `analyzer.models` as the provider; see `experiments/task_9b.py` for the per-cut driver, cache and record |
 | Another treebank (UD) | `experiments/treebank.py` (`load_ud_conllu`: subtree yields -> spans, drop non-projective); name the conversion in the record's `treebank` field |
 | Another replacement policy | A class satisfying `ReplacementPolicy` in `experiments/proforms.py`; if its proforms are a subset of a cache's header, phase B alone suffices |

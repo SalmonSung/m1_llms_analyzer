@@ -13,9 +13,9 @@ microservices, driven from Google Colab notebooks.
   teaching doc), when the model is loaded with its LM head.
 - **`next_token_states(ids, positions)`** — the full next-token log-probability vector at
   chosen positions, for state-distance experiments.
-- **Experiments** — Task 1b (bracket induction from substitution costs) and Task 9a
-  (omittability by splicing, length-matched, with a hand audit) end to end, each with a
-  resumable cache and the runbook's figure. See [Experiments](#experiments).
+- **Experiments** — Task 1b (bracket induction from substitution costs), Task 9a
+  (omittability by splicing, length-matched, with a hand audit) and Task 9b (does the deletion
+  change the generated text?) end to end, each with a resumable cache. See [Experiments](#experiments).
 
 ---
 
@@ -171,6 +171,36 @@ over `seg_len` -- a second matching variable, so close and far can be matched on
 well as length. A paragraph's `fluency` is the mean of `surprisal` over **all** tokens, token 0
 included, so `mean(surprisal)` reproduces it and `mean(surprisal[1:])` does not. `add_surprisal`
 fills these into an existing cache without changing any other byte, and reports both invariants.
+
+`notebooks/experiment_9b.ipynb` runs **Task 9b — does the deletion change what the model *writes*,
+not only what it predicts?** It reads the 9a cache and record (never writes them) and, for each of the
+record's labelled close / far cuts, measures two things that do not depend on a single decode. **A:**
+the log-probability of the author's actual next `W = 20` tokens under the original and the spliced
+context (`true_dlogp`, nats/token, plus the 20 per-token values). **B:** `K = 16` nucleus samples
+(`p = 0.95`, `T = 1.0`, `L = 30` new tokens, EOS an ordinary token) from context O = `ids[:j+1]` and
+S = `spliced[:i+1]`, seeded `20250914 + cut_index` with the same seed for both, compared as bags of
+token ids: `within` (mean F1 over the O–O pairs), `cross` (over the O–S pairs) and
+`sample_overlap = cross / within`. Every sampled continuation is stored so another overlap function can
+be applied later; `first_diff_greedy` is kept as a descriptive. The output is a separate record,
+`record_9b_<RUN_TAG>.json`, with three invariants reported: the cached `surprisal` reproduces `lp_orig`,
+the cut keys match the 9a record exactly, and `within > 0` everywhere. The pre-registered analysis is
+run from the record, outside the repo.
+
+```python
+from m1_analyzer.experiments import GenerationProtocol, build_record_9b, compute_generation_9b
+
+header, rows = compute_generation_9b(                                   # phase A, cached + resumable
+    analyzer.states, analyzer.models, "outputs/task_9a/record_9a.json", "outputs/task_9a/splices.jsonl",
+    cache_path="outputs/task_9b/gen_9b.jsonl", protocol=GenerationProtocol(),  # W_true=20, K=16, L=30, p=0.95, T=1.0
+    provenance={"model_id": "Qwen/Qwen3-0.6B-Base"})
+record = build_record_9b(header, rows, json.load(open("outputs/task_9a/record_9a.json")), model="Qwen/Qwen3-0.6B-Base")
+record["invariants"]["max_abs_cached_lp_diff"], record["invariants"]["keys_match"], record["invariants"]["n_collapsed"]
+```
+
+`lp_orig` comes from a fresh pass of the original ids in the same session as the spliced pass, so
+both sides of `true_dlogp` share one set of numerics; the 9a cache's `surprisal` is what it is checked
+against, not the input. Samples are drawn from a per-cut `torch.Generator`, so a re-run on the same GPU
+and dtype reproduces them and the global RNGs are never touched.
 
 ---
 

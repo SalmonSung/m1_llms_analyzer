@@ -5,7 +5,10 @@ sentence and caches the raw numbers; phase B (CPU): `analyse_1b` turns the
 cache into the record that `experiment_figures.fig_1b` draws.
 Task 9a -- phase A: `compute_splices` scores every admissible cut of every
 paragraph; phase B: `analyse_9a` builds the `fig_9a` record after the hand
-audit. See notebooks/experiment_1b.ipynb and notebooks/experiment_9a.ipynb.
+audit. Task 9b -- `compute_generation_9b` scores the author's continuation and
+samples continuations from the original and spliced contexts of every labelled
+9a cut; `build_record_9b` turns that cache into the Task 9b record. See
+notebooks/experiment_1b.ipynb, experiment_9a.ipynb and experiment_9b.ipynb.
 """
 
 from . import experiment_figures
@@ -57,6 +60,25 @@ from .task_9a import (
 )
 from .task_9a import validate_record as validate_record_9a
 from .task_9a import verdict as verdict_9a
+from .decoding import (
+    first_diff, greedy_continuation, nucleus_filter, overlap_stats, sample_continuations, token_f1,
+)
+from .task_9b import (
+    EOS_POLICY,
+    OVERLAP_MEASURE,
+    GenerationProtocol,
+    Inputs9a,
+    build_record_9b,
+    check_invariants_9b,
+    compute_generation_9b,
+    cut_specs,
+    load_9a_inputs,
+    load_generation_9b,
+    measure_a,
+    measure_b,
+    score_cut,
+    validate_record_9b,
+)
 from .proforms import (
     DEFAULT_PROFORMS, DELETION, ByLengthClass, MinOverSet, ReplacementPolicy, parse_policy, substitute,
 )
@@ -106,6 +128,10 @@ __all__ = [
     "splice_text", "surprisal_from_logprobs",
     "analyse_9a", "apply_audit", "assign_pairs", "audit_sample", "flatten_cuts", "load_audit_csv",
     "write_audit_csv", "validate_record_9a", "verdict_9a",
+    "first_diff", "greedy_continuation", "nucleus_filter", "overlap_stats", "sample_continuations", "token_f1",
+    "EOS_POLICY", "OVERLAP_MEASURE", "GenerationProtocol", "Inputs9a", "build_record_9b", "check_invariants_9b",
+    "compute_generation_9b", "cut_specs", "load_9a_inputs", "load_generation_9b", "measure_a", "measure_b",
+    "score_cut", "validate_record_9b",
     "DEFAULT_PROFORMS", "DELETION", "ByLengthClass", "MinOverSet", "ReplacementPolicy", "parse_policy",
     "substitute",
     "SpanCostTable", "compute_span_costs", "load_span_costs", "load_span_costs_with_gold", "variant_count",

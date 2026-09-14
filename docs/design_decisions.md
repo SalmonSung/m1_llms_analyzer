@@ -380,6 +380,61 @@ allows a window-sensitivity check without a re-run; the second makes the "fluenc
 divergence disagree" point reproducible (`diagnostics.continuous.spearman_fluency_delta_div`).
 Neither enters the verdict.
 
+## Experiments (Task 9b)
+
+### Two text measures, neither a single decode
+One greedy continuation cannot say whether a deletion changed what the model writes: after a
+sentence boundary the next sentence is nearly free, so greedy decodes from the original and the
+spliced context part within a few tokens either way, and that agreement length barely tracks the
+state divergence. Measure A scores the author's *actual* next `W` tokens under both contexts (a
+deterministic number per cut); measure B samples `K` continuations from each context and compares
+the two *sets* by bag-of-token F1. `first_diff_greedy` stays in the record as a descriptive because
+the theory document quotes it; nothing is judged on it.
+
+### `lp_orig` is recomputed, and the cache is the invariant
+The original side of measure A is available in the 9a cache as `-surprisal`, but it was scored in
+another session. Both sides of `true_dlogp` are taken from *this* session -- one original pass per
+paragraph, one spliced pass per cut, the same dtype and kernels -- so the difference is not
+contaminated by a change of GPU or library version. The cached surprisal is then compared against
+`lp_orig` and the maximum difference reported per cut and overall (invariant 1): a tolerance
+warning, never an adjustment.
+
+### Sampling uses its own loop and a per-cut `torch.Generator`
+`generate()` draws from the global RNG and its sampling path changes between versions. The
+protocol needs the original and spliced samples of one cut to be *paired by random state*, so the
+loop draws all `K` rows together with one `torch.multinomial` per step from a generator created and
+seeded (`seed_base + cut_index`) immediately before each context. Two contexts then consume the
+identical stream, and nothing else in the process observes a seed change. Nucleus filtering is the
+standard "smallest set whose mass reaches p, crossing token included", applied to float32
+probabilities. The KV cache is used for speed; `kv_cache=False` re-feeds the whole sequence and is
+the oracle the tests compare against.
+
+### EOS is an ordinary token and every sample has exactly `L` ids
+"EOS not forced" is read as *neither suppressed nor terminal*. Masking EOS would alter the
+distribution being compared; stopping at it would give bags of unequal size and an F1 that
+depends on length. So a sampled EOS is kept and decoding continues to `L`; the record counts how
+many samples contain one, per cut and overall.
+
+### `cross / within`, on token ids
+Raw cross-set F1 conflates "the spliced context writes something else" with "this context writes
+many different things anyway"; dividing by the within-set F1 of the original samples normalises
+the second away, so 1.0 means the same distribution of text. F1 is over token *ids* as multisets,
+with no detokenisation, so it is exactly recomputable from the stored samples -- which is why all
+`2K` continuations are in the record: any other overlap function can be applied to them later. A
+`within` of 0 leaves the ratio undefined; that cut is reported as collapsed, never patched.
+
+### The 9b record is additive and the 9a files are read-only
+Nothing in the 9a cache or record moves. The generation cache header carries the sha256 of both
+inputs, so resuming against a different 9a record or cache refuses and names the field, and the
+tests assert the input bytes are unchanged. The record keeps the requested fields first and the
+additive ones (`key`, `cut_index`, `seed`, `grammatical`, EOS counts, the greedy pairs) after them.
+
+### The analysis is not in the repository
+The pre-registered comparison (far vs close on both measures within 9a's length strata, the
+cluster bootstrap, the permutation test, Spearman with `state_div`) is run from the record on the
+analyst's side, by decision. The repo delivers the measurements and the invariants; `fig_9b`
+remains vendored for a record that carries `text_overlap`.
+
 ### `fig_9a` was edited, not vendored verbatim
 The runbook's figure printed a pooled Mann-Whitney in its title and cut strata at data
 tertiles, both of which the task text rules out. It now prints the stratified ratio, interval
@@ -529,5 +584,4 @@ Each of these is a real gap, listed so it is a decision rather than an oversight
 | **Universal Dependencies gold** | `load_ud_conllu` is a stub. Subtree yields → spans, drop non-projective yields, and say so in the record's `treebank` field; not comparable with PTB numbers. |
 | **In-memory score cache** | Phase A de-duplicates variants per sentence and the JSONL is the cache; a dict of 700k texts would be memory for nothing. |
 | **Truncating the spliced sequence at `i + 1 + window`** | Under causal attention it would give identical states at two thirds of the compute, but the full spliced text is what yields the exploratory fluency for free, and phase A on 200 paragraphs is minutes on a T4 either way. |
-| **Task 9b (does the generated text survive, not only the state?)** | Needs a decoding protocol fixed in advance and a text-overlap measure; `fig_9b` is vendored and the cache holds every cut's ids, so it is a phase-B-plus-generation module away. |
 | **Streaming / incremental writes** | A run is held in memory and written once. For a very large corpus, an append-mode sink (JSONL + a growing `.npz`) satisfying `ResultSink` would be the change. |
