@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 NOTEBOOKS_DIR = Path(__file__).resolve().parents[1] / "notebooks"
-NOTEBOOKS = ("colab_entrypoint.ipynb", "experiment_1b.ipynb", "experiment_9a.ipynb")
+NOTEBOOKS = ("colab_entrypoint.ipynb", "experiment_1b.ipynb", "experiment_9a.ipynb", "experiment_9b.ipynb")
 NOTEBOOK = NOTEBOOKS_DIR / NOTEBOOKS[0]
 
 
