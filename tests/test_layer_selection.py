@@ -2,7 +2,7 @@
 
 import pytest
 
-from m1_analyzer.testing import TINY_LAYERS
+from m1_analyzer.testing import TINY_LAYERS, TINY_MAX_POSITIONS
 
 
 def test_last_layer_is_the_final_block(loaded_model):
@@ -88,11 +88,64 @@ def test_encoder_decoder_models_are_rejected(loaded_model):
         loaded_model._reject_unsupported(_FakeConfig(is_encoder_decoder=True, architectures=["T5Model"]))
 
 
-def test_vision_models_are_rejected(loaded_model):
+def test_multimodal_models_are_accepted_in_text_only_mode(loaded_model, caplog):
+    """Gemma 3/4, Qwen-VL, ...: called with text only, the wrapper *is* its language model."""
+    import logging
+
+    loaded_model._multimodal = False
+    with caplog.at_level(logging.WARNING):
+        loaded_model._reject_unsupported(
+            _FakeConfig(vision_config={"hidden_size": 8}, text_config=_FakeConfig(model_type="gemma4_text"))
+        )
+    assert loaded_model._multimodal is True
+    assert any("multimodal" in r.getMessage() and "vision_config" in r.getMessage() for r in caplog.records)
+    loaded_model._multimodal = False
+
+
+def test_vision_encoder_decoder_models_are_still_rejected(loaded_model):
+    """TrOCR/Donut are encoder-decoder in disguise; the vision flag must not let them through."""
     from m1_analyzer.services.model_service import UnsupportedArchitectureError
 
-    with pytest.raises(UnsupportedArchitectureError, match="multimodal/vision"):
-        loaded_model._reject_unsupported(_FakeConfig(vision_config={"hidden_size": 8}))
+    with pytest.raises(UnsupportedArchitectureError, match="encoder-decoder"):
+        loaded_model._reject_unsupported(_FakeConfig(is_vision_encoder_decoder=True, vision_config={}))
+
+
+def test_nested_encoder_decoder_text_config_is_rejected(loaded_model):
+    from m1_analyzer.services.model_service import UnsupportedArchitectureError
+
+    with pytest.raises(UnsupportedArchitectureError, match="encoder-decoder"):
+        loaded_model._reject_unsupported(_FakeConfig(text_config=_FakeConfig(is_encoder_decoder=True)))
+
+
+def test_layer_and_size_attributes_come_from_text_config(loaded_model, monkeypatch):
+    """A composite config carries no top-level layer count; it lives under text_config."""
+    from m1_analyzer.services import model_service as ms
+
+    wrapper = _FakeConfig(
+        model_type="gemma4",
+        vision_config={"hidden_size": 8},
+        text_config=_FakeConfig(model_type="gemma4_text", num_hidden_layers=3, hidden_size=16, max_position_embeddings=64),
+    )
+    monkeypatch.setattr(type(loaded_model), "hf_config", property(lambda self: wrapper))
+    assert loaded_model.num_hidden_layers == 3
+    assert loaded_model.hidden_size == 16
+    # Context length is the smaller of tokenizer and text_config limits; the tiny
+    # tokenizer's limit is TINY_MAX_POSITIONS, so 64 must win only if it is smaller.
+    assert loaded_model.effective_max_length(None, 4096) == min(64, TINY_MAX_POSITIONS)
+    assert loaded_model.resolve_layers("all") == [(str(i), i) for i in range(4)]
+    meta = loaded_model.metadata()
+    assert meta["text_model_type"] == "gemma4_text"
+    assert meta["model_type"] == "gemma4"
+
+
+def test_text_config_as_plain_dict_is_readable(loaded_model):
+    from m1_analyzer.services.model_service import ModelService, _cfg_get
+
+    cfg = _FakeConfig(text_config={"num_hidden_layers": 5, "model_type": "llama"})
+    assert _cfg_get(ModelService._text_config(cfg), "num_hidden_layers") == 5
+    # No text_config: the config itself is the text config.
+    plain = _FakeConfig(num_hidden_layers=7)
+    assert ModelService._text_config(plain) is plain
 
 
 def test_decoder_only_models_are_accepted(loaded_model):

@@ -65,6 +65,18 @@ For T5/BART, `outputs.hidden_states` is the **encoder** stack; the decoder's are
 quietly wrong is worse than unsupported. `model_service._reject_unsupported` raises with an
 explanation. Supporting them properly means a config choice of which stack to read.
 
+### Multimodal models are accepted in text-only mode
+Composite checkpoints (Gemma 3/4, Llama-3.2-Vision, Qwen-VL) wrap a language model
+(`text_config`) and a vision tower (`vision_config`). Every forward call here passes only
+`input_ids` / `attention_mask`, so the wrapper computes exactly what its language model would:
+`hidden_states` is the text stack and `logits` is the LM head. Rejecting them bought nothing,
+so `model_service` loads them with a warning and reads layer count, hidden size and context
+length from `text_config` (the top-level config has none of them). The trade-off is that the
+vision tower's weights are loaded and idle -- a few percent of a large model. Loading *only*
+the text sub-model would save that memory but needs per-architecture weight-key remapping
+that breaks across `transformers` versions. Vision-**encoder-decoder** models (TrOCR, Donut)
+are still rejected: they are encoder-decoder models in disguise.
+
 ### `pad_token = eos_token` when a tokenizer has none
 GPT-2-family tokenizers ship no PAD token, which makes batching impossible. Reusing EOS is
 the standard fix and is safe here because the attention mask excludes those positions from

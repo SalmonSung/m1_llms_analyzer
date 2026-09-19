@@ -467,6 +467,7 @@ for and the resolved absolute index, so a saved result is never ambiguous.
 | New output format (Parquet, HDF5) | New class satisfying `ResultSink`; pass it to `Analyzer(storage_service=...)` |
 | Attention weights as well as hidden states | `inference_service._forward` (`output_attentions=True`), `domain/records.py`, `storage_service` |
 | Encoder-decoder support | `model_service._reject_unsupported` and `_forward` (decoder states are a separate output) |
+| Feeding images to a multimodal model (text-only already works) | `model_service` (`AutoProcessor` beside the tokenizer), `inference_service._forward` (`pixel_values`) |
 | Remote/HTTP model host | New class satisfying `ModelProvider`; nothing else changes |
 | A new experiment task | New `experiments/task_<id>.py` producing the record its `fig_<id>` docstring specifies; reuse `treebank.py`, `spans.py`, `span_costs.py`, `stats.py`, `jsonl_cache.py`; a notebook copied from `experiment_1b.ipynb` or `experiment_9a.ipynb` |
 | A state-level experiment (distances between next-token vectors) | `NextTokenStateService.states(ids, positions)` via `analyzer.states`; see `experiments/splice.py` for the alignment bookkeeping |

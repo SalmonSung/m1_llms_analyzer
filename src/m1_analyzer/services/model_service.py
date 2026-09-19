@@ -22,6 +22,17 @@ transformer, hidden states only) and ``"causal_lm"`` loads
 ``AutoModelForCausalLM`` (adds the language-model head, so next-token
 log-probabilities can be scored). A causal-LM model still returns hidden
 states, so extraction works with either; the base head is simply lighter.
+
+Multimodal (vision + text) models
+---------------------------------
+Composite checkpoints such as Gemma 3/4, Llama-3.2-Vision or Qwen-VL carry a
+``vision_config`` next to a ``text_config`` that holds the language model. This
+pipeline only ever passes ``input_ids`` / ``attention_mask``, so the wrapper
+behaves exactly like its language model: ``hidden_states`` and ``logits`` are the
+text stack's. Such models are therefore loaded in text-only mode with a warning,
+and layer count / hidden size / context length are read from ``text_config``.
+The vision tower's weights are loaded but never run. Encoder-decoder models
+(including vision-encoder-decoder ones such as TrOCR) are still rejected.
 """
 
 from __future__ import annotations
@@ -62,6 +73,7 @@ class ModelService:
         self._dtype: Any = None
         self._resolved_revision: str | None = None
         self._pad_token_added = False
+        self._multimodal = False
 
     # ------------------------------------------------------------------ load
 
@@ -163,20 +175,51 @@ class ModelService:
         )
 
     def _reject_unsupported(self, hf_config: Any) -> None:
-        """Fail loudly on architectures whose hidden states mean something else."""
-        if getattr(hf_config, "is_encoder_decoder", False):
-            arch = (getattr(hf_config, "architectures", None) or ["unknown"])[0]
+        """Fail loudly on architectures whose hidden states mean something else.
+
+        Multimodal (vision + text) models are *not* rejected: called with text only,
+        the wrapper is its language model. They are flagged and warned about instead.
+        """
+        text_cfg = self._text_config(hf_config)
+        is_enc_dec = bool(
+            _cfg_get(hf_config, "is_encoder_decoder")
+            or _cfg_get(hf_config, "is_vision_encoder_decoder")
+            or (text_cfg is not hf_config and _cfg_get(text_cfg, "is_encoder_decoder"))
+        )
+        if is_enc_dec:
+            arch = (_cfg_get(hf_config, "architectures") or ["unknown"])[0]
             raise UnsupportedArchitectureError(
                 f"{self.config.model_id} ({arch}) is an encoder-decoder model. Its "
                 "`hidden_states` are the *encoder* states, while `decoder_hidden_states` are "
                 "separate -- saving one as 'the last layer' would be misleading. Decoder-only "
                 "and encoder-only models are supported today; see docs/design_decisions.md."
             )
-        if getattr(hf_config, "is_vision_encoder_decoder", False) or getattr(hf_config, "vision_config", None):
-            raise UnsupportedArchitectureError(
-                f"{self.config.model_id} appears to be a multimodal/vision model. This pipeline "
-                "feeds text only; load a text model or extend ModelService."
+        modalities = [
+            name for name in ("vision", "audio")
+            if _cfg_get(hf_config, f"{name}_config") is not None
+        ]
+        if modalities:
+            self._multimodal = True
+            log.warning(
+                "%s is a multimodal model (%s). This pipeline feeds text only, so hidden "
+                "states and log-probabilities come from its language model (%s); the %s "
+                "tower weights are loaded but never run. Layer count, hidden size and "
+                "context length are read from `text_config`.",
+                self.config.model_id,
+                ", ".join(f"{m}_config" for m in modalities),
+                _cfg_get(text_cfg, "model_type") or "text_config",
+                "/".join(modalities),
             )
+
+    @staticmethod
+    def _text_config(hf_config: Any) -> Any:
+        """The language-model sub-config of a composite config, else the config itself.
+
+        Some remote-code configs store ``text_config`` as a plain dict; ``_cfg_get``
+        reads either, so callers never need to care.
+        """
+        sub = _cfg_get(hf_config, "text_config")
+        return sub if sub is not None else hf_config
 
     def _require_causal_lm(self, hf_config: Any) -> None:
         """The causal head only exists for decoder-only architectures."""
@@ -184,8 +227,9 @@ class ModelService:
             from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
         except Exception:  # pragma: no cover - very old transformers
             return
-        model_type = getattr(hf_config, "model_type", None)
-        if model_type not in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES:
+        model_type = _cfg_get(hf_config, "model_type")
+        text_model_type = _cfg_get(self._text_config(hf_config), "model_type")
+        if not any(t in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES for t in (model_type, text_model_type) if t):
             raise UnsupportedArchitectureError(
                 f"{self.config.model_id} (model_type={model_type!r}) has no causal language-"
                 "model head in transformers, so it cannot score next-token log-probabilities. "
@@ -263,20 +307,31 @@ class ModelService:
         return self._model.config
 
     @property
+    def text_config(self) -> Any:
+        """Where layer count / hidden size live: ``text_config`` on multimodal wrappers."""
+        return self._text_config(self.hf_config)
+
+    @property
+    def multimodal(self) -> bool:
+        """True when the loaded checkpoint also carries a vision/audio tower (unused here)."""
+        self._require_loaded()
+        return self._multimodal
+
+    @property
     def num_hidden_layers(self) -> int:
         """Number of transformer blocks (excludes the embedding output)."""
-        cfg = self.hf_config
+        cfg = self.text_config
         for attr in ("num_hidden_layers", "n_layer", "num_layers", "n_layers"):
-            value = getattr(cfg, attr, None)
+            value = _cfg_get(cfg, attr)
             if isinstance(value, int) and value > 0:
                 return value
         raise ModelLoadError(f"Could not determine layer count for {self.config.model_id}.")
 
     @property
     def hidden_size(self) -> int:
-        cfg = self.hf_config
+        cfg = self.text_config
         for attr in ("hidden_size", "n_embd", "d_model", "dim"):
-            value = getattr(cfg, attr, None)
+            value = _cfg_get(cfg, attr)
             if isinstance(value, int) and value > 0:
                 return value
         raise ModelLoadError(f"Could not determine hidden size for {self.config.model_id}.")
@@ -367,9 +422,9 @@ class ModelService:
         tok_max = getattr(self._tokenizer, "model_max_length", None)
         if isinstance(tok_max, int) and tok_max > 0 and tok_max not in _SENTINEL_LENGTHS:
             candidates.append(tok_max)
-        cfg = self.hf_config
+        cfg = self.text_config
         for attr in ("max_position_embeddings", "n_positions", "max_seq_len", "seq_length"):
-            value = getattr(cfg, attr, None)
+            value = _cfg_get(cfg, attr)
             if isinstance(value, int) and value > 0:
                 candidates.append(value)
         return min(candidates) if candidates else _DEFAULT_MAX_LENGTH
@@ -385,6 +440,8 @@ class ModelService:
             "head": self.config.head,
             "architecture": self.architecture,
             "model_type": getattr(self.hf_config, "model_type", None),
+            "text_model_type": _cfg_get(self.text_config, "model_type"),
+            "multimodal": self._multimodal,
             "num_hidden_layers": self.num_hidden_layers,
             "hidden_size": self.hidden_size,
             "device": self._device,
@@ -394,6 +451,15 @@ class ModelService:
             "device_info": describe_device(self._device or "cpu"),
             "library_versions": library_versions(),
         }
+
+
+def _cfg_get(cfg: Any, attr: str) -> Any:
+    """Read a config attribute from a transformers config object *or* a plain dict."""
+    if cfg is None:
+        return None
+    if isinstance(cfg, dict):
+        return cfg.get(attr)
+    return getattr(cfg, attr, None)
 
 
 def library_versions() -> dict[str, str]:

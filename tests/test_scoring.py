@@ -148,6 +148,20 @@ def test_causal_head_rejects_models_without_one(tiny_model_path, monkeypatch):
         service._require_causal_lm(NotCausal())
 
 
+def test_causal_head_accepts_multimodal_wrapper_via_text_config(tiny_model_path):
+    """A vision+text wrapper's own model_type may be unknown; its text_config decides."""
+    service = ModelService(ModelConfig(model_id=tiny_model_path, head="causal_lm"))
+
+    class TextPart:
+        model_type = "gpt2"
+
+    class Wrapper:
+        model_type = "some-new-multimodal-wrapper"
+        text_config = TextPart()
+
+    service._require_causal_lm(Wrapper())  # must not raise
+
+
 def test_halved_batch_size_sticks_across_calls_and_grows_back(lm):
     scorer = LogProbService(lm, ScoringConfig(batch_size="auto", max_batch_size=8))
     scorer.batch_sizer = None
