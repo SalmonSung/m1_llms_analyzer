@@ -1,0 +1,3 @@
+PTB tokens -> text the model reads (detokenize_ptb):
+  ['The', 'company', 'does', "n't", 'own', '5', '%', '-LRB-', 'yet', '-RRB-', '.']
+  -> The company doesn't own 5% (yet).

@@ -1,0 +1,28 @@
+{
+  "kind": "header",
+  "schema": 1,
+  "task": "9b",
+  "protocol": {
+    "W_true": 5,
+    "K": 4,
+    "L": 6,
+    "top_p": 0.95,
+    "temperature": 1.0,
+    "seed_base": 20250914,
+    "greedy_cap": 6,
+    "sampling": "nucleus p=0.95, T=1.0, seed 20250914+idx, paired O/S",
+    "overlap": "token F1 on ids, cross/within",
+    "eos": "ordinary token: never suppressed, never a stop; every sample is exactly L ids",
+    "top_k": null,
+    "repetition_penalty": 1.0,
+    "kv_cache": true
+  },
+  "source_record": "<varies per run>",
+  "source_cache": "<varies per run>",
+  "n_cuts_expected": 36,
+  "bos_id": 2,
+  "eos_id": 2,
+  "pad_id": 2,
+  "date": "<varies per run>",
+  "model_id": "tiny random GPT-2 (illustrative)"
+}

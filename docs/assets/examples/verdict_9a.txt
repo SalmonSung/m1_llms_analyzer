@@ -1,0 +1,5 @@
+stratified far/close median divergence 9.082x [6.731, 12.743], permutation p = 0.0033 over 3 usable stratum/strata (n close/far: 20–39 tokens: 13/13, 40–79 tokens: 26/26, 80–159 tokens: 56/56).
+PASS: far cuts diverge more within length strata -- the skip reading's core claim holds.
+Pooled (unmatched lengths) ratio 9.16x with median deleted 38.0 vs 173.5 tokens: NOT a pass criterion (length-confounded).
+Spearman(deleted tokens, divergence) = +0.48, (endpoint distance, divergence) = +0.97, (deleted tokens, endpoint distance) = +0.61.
+Audit sheet not loaded: every cut is grammatical by construction only (audited=false).

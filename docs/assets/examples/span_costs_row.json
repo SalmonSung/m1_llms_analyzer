@@ -1,0 +1,105 @@
+{
+  "kind": "sentence",
+  "id": "theory-doc",
+  "words": [
+    "The",
+    "tall",
+    "man",
+    "with",
+    "the",
+    "red",
+    "hat",
+    "quickly",
+    "opened",
+    "the",
+    "heavy",
+    "wooden",
+    "door"
+  ],
+  "text": "The tall man with the red hat quickly opened the heavy wooden door",
+  "base": [
+    -39.0,
+    13
+  ],
+  "spans": {
+    "it": {
+      "0,1": [
+        -48.6221,
+        12
+      ],
+      "0,2": [
+        -35.414,
+        11
+      ],
+      "0,3": [
+        -48.8953,
+        10
+      ],
+      "...": "74 more spans"
+    },
+    "there": {
+      "0,1": [
+        -50.0789,
+        12
+      ],
+      "0,2": [
+        -37.8088,
+        11
+      ],
+      "0,3": [
+        -50.2556,
+        10
+      ],
+      "...": "74 more spans"
+    },
+    "did": {
+      "0,1": [
+        -49.7948,
+        12
+      ],
+      "0,2": [
+        -38.0015,
+        11
+      ],
+      "0,3": [
+        -50.2768,
+        10
+      ],
+      "...": "74 more spans"
+    },
+    "...": "3 more proforms / controls"
+  },
+  "failed": 0,
+  "gold_spans": [
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      6
+    ],
+    [
+      3,
+      6
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      7,
+      12
+    ],
+    [
+      8,
+      12
+    ],
+    [
+      9,
+      12
+    ]
+  ],
+  "source": "hand parse (theory doc)",
+  "info": {}
+}

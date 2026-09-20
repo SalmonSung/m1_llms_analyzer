@@ -1,0 +1,20 @@
+{
+  "n_paragraphs": 6,
+  "n_with_surprisal": 6,
+  "n_missing": 0,
+  "n_cuts": 154,
+  "n_bad_paragraph_length": 0,
+  "n_bad_cut_length": 0,
+  "n_null_token0": 0,
+  "max_abs_mean_all_minus_fluency": 0.0,
+  "n_within_tol_all": 6,
+  "max_abs_mean_from_1_minus_fluency": 0.0014,
+  "n_within_tol_from_1": 4,
+  "max_abs_del_surp_minus_sum": 0.0,
+  "tol": 0.001,
+  "fluency_definition": "fluency = mean of surprisal over ALL scored tokens: with a BOS prepended (bos_policy='auto') that is every token including token 0 predicted from BOS, so mean(surprisal) reproduces fluency and mean(surprisal[1:]) does not; under bos_policy='none' token 0 is unscored (null) and the two agree",
+  "ok": true,
+  "n_augmented": 0,
+  "n_skipped": 6,
+  "written": null
+}

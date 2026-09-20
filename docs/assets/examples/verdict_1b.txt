@@ -1,0 +1,3 @@
+substitution-induced F1 0.807 [0.7926, 0.8296] vs right-branching 0.578 [0.5111, 0.6222].
+PASS: clears both baselines by their paired-bootstrap intervals.
+Rank-curve area 0.948 (0.5 = chance): costs rank gold spans early.

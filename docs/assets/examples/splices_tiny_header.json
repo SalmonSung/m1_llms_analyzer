@@ -1,0 +1,34 @@
+{
+  "kind": "header",
+  "schema": 2,
+  "task": "9a",
+  "window": 5,
+  "divergence_measure": "median over k = 0..window-1 of the L2 distance between the spliced text's next-token log-probability vector at position i+1+k and the original text's at position j+1+k",
+  "distance_measure": "L2 distance between the original text's next-token log-probability vectors at the two endpoint positions i and j",
+  "splitter": "regex",
+  "boundary_rule": "sentence-final: terminal punctuation (+ closers), the token ends exactly there, whitespace follows, AND the text after it begins a new sentence (right-side check, schema 2)",
+  "boundary_kinds": [
+    "sentence",
+    "clause"
+  ],
+  "primary_boundary": "sentence",
+  "strata": [
+    [
+      1,
+      10
+    ],
+    [
+      10,
+      30
+    ],
+    [
+      30,
+      80
+    ]
+  ],
+  "decile": 0.1,
+  "match_width": 10,
+  "splice": "token ids: ids[:i+1] + ids[j+1:]; states are float32 log-softmax vectors",
+  "surprisal_measure": "-log p of the actual next token from the original-text pass, float32 log-softmax, same BOS/indexing as states",
+  "model_id": "tiny random GPT-2 (illustrative)"
+}

@@ -1,0 +1,7 @@
+sentence: The tall man with the red hat quickly opened the heavy wooden door   (n = 13 words)
+enumerate_spans(13) -> 77 spans, first five: [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5)]
+crosses((0, 2), (1, 4)) -> True    crosses((0, 2), (3, 6)) -> False
+right_branching(6) -> [(1, 5), (2, 5), (3, 5), (4, 5)]
+left_branching(6)  -> [(0, 1), (0, 2), (0, 3), (0, 4)]
+gold spans of the theory sentence: [(0, 2), (0, 6), (3, 6), (4, 6), (7, 12), (8, 12), (9, 12)]
+as brackets: [[The tall man] [with [the red hat]]] [quickly [opened [the heavy wooden door]]]

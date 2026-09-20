@@ -1,0 +1,18 @@
+paragraph 'hand-0' (51 whitespace tokens; a real run uses the model's tokenizer offsets):
+  The quick brown fox jumps over the lazy dog. The dog jumps over the fox. The fox jumps over the model. The model jumps over the layer. The layer jumps over the state. The state jumps over the token. The token jumps over the text. The text jumps over the dog.
+
+boundary_positions(text, offsets, splitter='regex') -> {'sentence': [8, 14, 20, 26, 32, 38, 44, 50], 'clause': []}, rejected sentence ends: 0
+admissible_cuts(boundaries, n_tokens=51, window=5) -> 21 cuts; the first five:
+  Cut(i=8, j=14, boundary='sentence')  deletes 6 tokens
+  Cut(i=8, j=20, boundary='sentence')  deletes 12 tokens
+  Cut(i=8, j=26, boundary='sentence')  deletes 18 tokens
+  Cut(i=8, j=32, boundary='sentence')  deletes 24 tokens
+  Cut(i=8, j=38, boundary='sentence')  deletes 30 tokens
+
+the first cut, (i, j) = (8, 14):
+  splice_text -> The quick brown fox jumps over the lazy dog. ⟦cut⟧  The fox jumps over the model. The model jumps over the layer. The layer jumps over the state. The state jumps over the token. The token jumps over the text. The text jumps over the dog.
+  splice_ids(list(range(51)), 8, 14) -> [0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]
+
+Phase A then asks the model for the next-token state at i and at j of the ORIGINAL (their L2
+distance is d) and at i+1..i+window of the SPLICED text versus j+1..j+window of the original
+(the per-position div_k; the median is div).

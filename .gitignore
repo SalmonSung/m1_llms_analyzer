@@ -28,3 +28,6 @@ outputs/
 # HF / NLTK caches if they land in-repo
 .cache/
 nltk_data/
+
+# Docs site build output (mkdocs build)
+site/

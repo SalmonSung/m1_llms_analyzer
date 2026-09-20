@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "run": {
+    "run_id": "<varies per run>",
+    "created_at": "<varies per run>",
+    "model_id": "<local tiny random GPT-2: 4 layers, hidden size 16>",
+    "revision": null,
+    "architecture": "GPT2Model",
+    "device": "<varies per run>",
+    "dtype": "float32",
+    "layers_requested": [
+      -1,
+      "middle"
+    ],
+    "layers_resolved": [
+      4,
+      2
+    ],
+    "layer_index_convention": "hidden_states[0] is the embedding output; hidden_states[i] is the output of transformer block i for i in 1..num_hidden_layers",
+    "pooling": "last_token",
+    "max_length": 256,
+    "seed": 42,
+    "num_hidden_layers": 4,
+    "hidden_size": 16,
+    "library_versions": "<varies per run>",
+    "config_fingerprint": "c1a6b1a91e233dfc",
+    "schema_version": "1.0",
+    "extra": {
+      "layer_labels": [
+        "-1",
+        "middle"
+      ],
+      "device_info": "<varies per run>",
+      "pad_token_substituted": true,
+      "head": "base",
+      "model_context_length": 256,
+      "strict_determinism": false
+    }
+  },
+  "counts": {
+    "records": 2,
+    "failures": 0,
+    "total_floats": 64
+  },
+  "storage": {
+    "float_precision": 6,
+    "values_in_sidecar": false,
+    "sidecar_file": null,
+    "include_input_text": true
+  },
+  "records": [
+    {
+      "id": "b94d27b9934d3e08",
+      "token_count": 2,
+      "original_token_count": 2,
+      "truncated": false,
+      "layers": {
+        "-1": {
+          "index": 4,
+          "requested": "-1",
+          "shape": [
+            16
+          ],
+          "values": [
+            0.6641,
+            -1.6297,
+            0.8907,
+            -0.1547,
+            "..."
+          ],
+          "npy_ref": null
+        },
+        "middle": {
+          "index": 2,
+          "requested": "middle",
+          "shape": [
+            16
+          ],
+          "values": [
+            0.0104,
+            -0.0296,
+            0.017,
+            -0.0053,
+            "..."
+          ],
+          "npy_ref": null
+        }
+      },
+      "text": "hello world"
+    },
+    {
+      "id": "05c6e08f1d9fdafa",
+      "token_count": 9,
+      "original_token_count": 9,
+      "truncated": false,
+      "layers": {
+        "-1": {
+          "index": 4,
+          "requested": "-1",
+          "shape": [
+            16
+          ],
+          "values": [
+            -0.6971,
+            -1.7913,
+            0.0662,
+            -1.2771,
+            "..."
+          ],
+          "npy_ref": null
+        },
+        "middle": {
+          "index": 2,
+          "requested": "middle",
+          "shape": [
+            16
+          ],
+          "values": [
+            -0.026,
+            -0.0571,
+            0.0014,
+            -0.0385,
+            "..."
+          ],
+          "npy_ref": null
+        }
+      },
+      "text": "the quick brown fox jumps over the lazy dog"
+    }
+  ],
+  "failures": []
+}
