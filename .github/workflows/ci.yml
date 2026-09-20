@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            requirements-dev.txt
+      # The CPU wheel: ~200 MB instead of the multi-GB CUDA build PyPI resolves to on Linux.
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install -e ".[dev]"
+      # Un-skips the NLTK treebank loader test.
+      - run: python -c "import nltk; nltk.download('treebank', quiet=True)"
+      - run: pytest -q
+      - run: python scripts/smoke_test.py --offline
+      # The docs examples are generated and committed; fail if the code moved away from them.
+      - run: python scripts/make_doc_examples.py --check

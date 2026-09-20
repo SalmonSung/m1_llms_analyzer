@@ -1,0 +1,28 @@
+original: The tall man with the red hat quickly opened the heavy wooden door
+
+substitute(words, 3, 6, 'it')
+  words -> ['The', 'tall', 'man', 'it', 'quickly', 'opened', 'the', 'heavy', 'wooden', 'door']
+  text  -> The tall man it quickly opened the heavy wooden door
+
+substitute(words, 0, 2, 'it')
+  words -> ['It', 'with', 'the', 'red', 'hat', 'quickly', 'opened', 'the', 'heavy', 'wooden', 'door']
+  text  -> It with the red hat quickly opened the heavy wooden door
+
+substitute(words, 8, 12, 'did')
+  words -> ['The', 'tall', 'man', 'with', 'the', 'red', 'hat', 'quickly', 'did']
+  text  -> The tall man with the red hat quickly did
+
+substitute(words, 9, 12, 'do so')
+  words -> ['The', 'tall', 'man', 'with', 'the', 'red', 'hat', 'quickly', 'opened', 'do so']
+  text  -> The tall man with the red hat quickly opened do so
+
+substitute(words, 7, 12, '<del>')
+  words -> ['The', 'tall', 'man', 'with', 'the', 'red', 'hat']
+  text  -> The tall man with the red hat
+
+substitute(words, 4, 6, 'blorp')
+  words -> ['The', 'tall', 'man', 'with', 'blorp', 'quickly', 'opened', 'the', 'heavy', 'wooden', 'door']
+  text  -> The tall man with blorp quickly opened the heavy wooden door
+
+cost(i, j) = mean log-prob per token of the original - that of the variant; the
+policy (min over the real proforms) picks the cheapest proform; controls are scored but never chosen.

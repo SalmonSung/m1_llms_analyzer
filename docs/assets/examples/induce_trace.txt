@@ -1,0 +1,25 @@
+Greedy induction on the theory sentence, costs from FakeSpanScorer (gold cheap, crossing dear):
+
+     span     cost  decision
+  (7, 12)    0.146  kept
+   (3, 6)    0.207  kept
+   (4, 6)    0.211  kept
+  (8, 12)    0.283  kept
+   (0, 6)    0.301  kept
+   (0, 2)    0.319  kept
+  (9, 12)    0.322  kept
+  (9, 11)    0.791  kept
+  (9, 10)    0.864  kept
+ (10, 11)    0.883  skipped: crosses (9, 10)
+ (10, 12)    0.911  skipped: crosses (9, 11)
+   (0, 1)    0.955  kept
+   (1, 2)    0.985  skipped: crosses (0, 1)
+   (5, 6)    0.990  kept
+ (11, 12)    1.006  skipped: crosses (9, 11)
+   (4, 5)    1.105  skipped: crosses (5, 6)
+... 61 more spans visited
+
+kept (11 spans): [(0, 1), (0, 2), (0, 6), (3, 6), (4, 6), (5, 6), (7, 12), (8, 12), (9, 10), (9, 11), (9, 12)]
+as brackets: [[[The tall] man] [with [the [red hat]]]] [quickly [opened [[[the heavy] wooden] door]]]
+gold:        [[The tall man] [with [the red hat]]] [quickly [opened [the heavy wooden door]]]
+bracket P/R/F1 vs gold = 0.636 / 1.000 / 0.778   right-branching F1 = 0.333   left-branching F1 = 0.222

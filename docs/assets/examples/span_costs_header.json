@@ -1,0 +1,28 @@
+{
+  "kind": "header",
+  "schema": 2,
+  "policy": "min over {it, there, did, then} + controls {blorp, <del>}",
+  "proforms": [
+    "it",
+    "there",
+    "did",
+    "then",
+    "blorp",
+    "<del>"
+  ],
+  "conventions": "spans are (first_word, last_word) inclusive, 0-based, over `words`; traces (-NONE-) and punctuation tags removed with any node they empty; unaries collapsed (gold is a set); labels dropped (unlabelled scoring); single words and the whole sentence excluded",
+  "punct_tags": [
+    "#",
+    "$",
+    "''",
+    ",",
+    "-LRB-",
+    "-RRB-",
+    ".",
+    ":",
+    "``"
+  ],
+  "trace_tag": "-NONE-",
+  "includes_trees": false,
+  "model_id": "FakeSpanScorer (illustrative)"
+}

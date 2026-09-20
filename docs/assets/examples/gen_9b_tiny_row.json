@@ -1,0 +1,128 @@
+{
+  "kind": "cut",
+  "key": "hand-0:9-37",
+  "cut_index": 0,
+  "paragraph": "hand-0",
+  "i": 9,
+  "j": 37,
+  "pair": "far",
+  "stratum": "10–29 tokens",
+  "seg_len": 28,
+  "state_div": 0.5773,
+  "grammatical": true,
+  "seed": 20250914,
+  "n_tokens": 59,
+  "lp_orig": [
+    -3.704,
+    -3.6512,
+    -3.7041,
+    -3.6834,
+    "..."
+  ],
+  "lp_spl": [
+    -3.6404,
+    -3.6889,
+    -3.7018,
+    -3.5689,
+    "..."
+  ],
+  "true_dlogp_k": [
+    -0.0635,
+    0.0377,
+    -0.0023,
+    -0.1144,
+    "..."
+  ],
+  "true_dlogp": -0.0103,
+  "cached_lp_orig_max_abs_diff": 0.0,
+  "samples_orig": [
+    [
+      28,
+      21,
+      18,
+      26,
+      "..."
+    ],
+    [
+      5,
+      38,
+      35,
+      30,
+      "..."
+    ],
+    [
+      30,
+      1,
+      36,
+      34,
+      "..."
+    ],
+    [
+      35,
+      23,
+      27,
+      20,
+      "..."
+    ]
+  ],
+  "samples_spliced": [
+    [
+      28,
+      21,
+      18,
+      26,
+      "..."
+    ],
+    [
+      5,
+      38,
+      35,
+      30,
+      "..."
+    ],
+    [
+      30,
+      1,
+      36,
+      34,
+      "..."
+    ],
+    [
+      35,
+      23,
+      27,
+      20,
+      "..."
+    ]
+  ],
+  "within": 0.25,
+  "cross": 0.4062,
+  "within_spliced": 0.2222,
+  "sample_overlap": 1.625,
+  "n_eos_orig": 0,
+  "n_eos_spliced": 0,
+  "greedy_orig": [
+    30,
+    30,
+    30,
+    30,
+    "..."
+  ],
+  "greedy_spliced": [
+    30,
+    30,
+    30,
+    30,
+    "..."
+  ],
+  "first_diff_greedy": 6,
+  "seconds": "<varies per run>",
+  "samples_orig_decoded": [
+    "vector test hidden five A [PAD]",
+    "the Hello A . hello The"
+  ],
+  "samples_spliced_decoded": [
+    "vector test hidden five A one",
+    "the Hello A . hello The"
+  ]
+}

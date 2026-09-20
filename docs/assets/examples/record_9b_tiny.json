@@ -1,0 +1,273 @@
+{
+  "cuts": [
+    {
+      "paragraph": "hand-0",
+      "i": 9,
+      "j": 37,
+      "pair": "far",
+      "stratum": "10–29 tokens",
+      "seg_len": 28,
+      "state_div": 0.5773,
+      "true_dlogp": -0.0103,
+      "true_dlogp_k": [
+        -0.0635,
+        0.0377,
+        -0.0023,
+        -0.1144,
+        "..."
+      ],
+      "sample_overlap": 1.625,
+      "within": 0.25,
+      "cross": 0.4062,
+      "samples_orig": [
+        [
+          28,
+          21,
+          18,
+          26,
+          "..."
+        ],
+        [
+          5,
+          38,
+          35,
+          30,
+          "..."
+        ],
+        [
+          30,
+          1,
+          36,
+          34,
+          "..."
+        ],
+        [
+          35,
+          23,
+          27,
+          20,
+          "..."
+        ]
+      ],
+      "samples_spliced": [
+        [
+          28,
+          21,
+          18,
+          26,
+          "..."
+        ],
+        [
+          5,
+          38,
+          35,
+          30,
+          "..."
+        ],
+        [
+          30,
+          1,
+          36,
+          34,
+          "..."
+        ],
+        [
+          35,
+          23,
+          27,
+          20,
+          "..."
+        ]
+      ],
+      "first_diff_greedy": 6,
+      "key": "hand-0:9-37",
+      "cut_index": 0,
+      "seed": 20250914,
+      "grammatical": true,
+      "n_eos_orig": 0,
+      "n_eos_spliced": 0,
+      "within_spliced": 0.2222,
+      "greedy_orig": [
+        30,
+        30,
+        30,
+        30,
+        "..."
+      ],
+      "greedy_spliced": [
+        30,
+        30,
+        30,
+        30,
+        "..."
+      ],
+      "cached_lp_orig_max_abs_diff": 0.0
+    },
+    {
+      "paragraph": "hand-0",
+      "i": 16,
+      "j": 23,
+      "pair": "close",
+      "stratum": "1–9 tokens",
+      "seg_len": 7,
+      "state_div": 0.5484,
+      "true_dlogp": 0.0359,
+      "true_dlogp_k": [
+        0.0335,
+        0.0468,
+        0.0385,
+        -0.0404,
+        "..."
+      ],
+      "sample_overlap": 2.4,
+      "within": 0.1389,
+      "cross": 0.3333,
+      "samples_orig": [
+        [
+          18,
+          6,
+          31,
+          5,
+          "..."
+        ],
+        [
+          26,
+          3,
+          18,
+          10,
+          "..."
+        ],
+        [
+          4,
+          29,
+          31,
+          2,
+          "..."
+        ],
+        [
+          37,
+          4,
+          35,
+          21,
+          "..."
+        ]
+      ],
+      "samples_spliced": [
+        [
+          18,
+          6,
+          31,
+          5,
+          "..."
+        ],
+        [
+          26,
+          3,
+          18,
+          10,
+          "..."
+        ],
+        [
+          4,
+          29,
+          31,
+          2,
+          "..."
+        ],
+        [
+          37,
+          4,
+          35,
+          21,
+          "..."
+        ]
+      ],
+      "first_diff_greedy": 1,
+      "key": "hand-0:16-23",
+      "cut_index": 1,
+      "seed": 20250915,
+      "grammatical": true,
+      "n_eos_orig": 1,
+      "n_eos_spliced": 1,
+      "within_spliced": 0.1667,
+      "greedy_orig": [
+        30,
+        30,
+        30,
+        30,
+        "..."
+      ],
+      "greedy_spliced": [
+        30,
+        24,
+        24,
+        24,
+        "..."
+      ],
+      "cached_lp_orig_max_abs_diff": 0.0
+    },
+    "..."
+  ],
+  "protocol": {
+    "W_true": 5,
+    "K": 4,
+    "L": 6,
+    "top_p": 0.95,
+    "temperature": 1.0,
+    "seed_base": 20250914,
+    "greedy_cap": 6,
+    "sampling": "nucleus p=0.95, T=1.0, seed 20250914+idx, paired O/S",
+    "overlap": "token F1 on ids, cross/within",
+    "eos": "ordinary token: never suppressed, never a stop; every sample is exactly L ids",
+    "top_k": null,
+    "repetition_penalty": 1.0,
+    "bos_policy": "auto"
+  },
+  "meta": {
+    "model": "tiny random GPT-2 (illustrative)",
+    "revision": null,
+    "dtype": null,
+    "date": "<varies per run>",
+    "notes": "n_cuts=36/36; keys match the 9a record; max |lp_orig + cached surprisal| = 5.00e-07; 0 collapsed sample set(s); source record sha256 7eea2595e6b5"
+  },
+  "invariants": {
+    "n_expected": 36,
+    "n_rows": 36,
+    "keys_match": true,
+    "order_ok": true,
+    "missing": [],
+    "extra": [],
+    "max_abs_cached_lp_diff": 0.0,
+    "n_cuts_within_tol": 36,
+    "n_without_cached_surprisal": 0,
+    "tol": 0.0,
+    "lp_orig_ok": true,
+    "n_collapsed": 0,
+    "collapsed": [],
+    "n_with_eos_orig": 15,
+    "n_with_eos_spliced": 15,
+    "state_div_matches": true,
+    "ok": true
+  },
+  "source": {
+    "record_9a": {
+      "name": "record_9a.json",
+      "sha256": "7eea2595e6b583b4f8833607f8b67480db861d683169ce47d17dcc5120682709",
+      "n_cuts": 36,
+      "model": "tiny random GPT-2 (illustrative)",
+      "date": "<varies per run>",
+      "window": 5
+    },
+    "cache_9a": {
+      "name": "splices.jsonl",
+      "sha256": "4be01eeaf4bec7397cd7dde8897c064b6a076d11d35c65c1d929fe6df17b9f3a",
+      "schema": 2,
+      "window": 5,
+      "model_id": "tiny random GPT-2 (illustrative)",
+      "revision": null,
+      "dtype": null,
+      "bos_token": null,
+      "vocab_size": null
+    }
+  }
+}

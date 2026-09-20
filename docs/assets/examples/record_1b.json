@@ -1,0 +1,158 @@
+{
+  "n_sentences": 9,
+  "treebank": "hand parse (theory doc)",
+  "methods": [
+    {
+      "name": "substitution-induced",
+      "f1": 0.8074,
+      "ci": [
+        0.7926,
+        0.8296
+      ]
+    },
+    {
+      "name": "right-branching",
+      "f1": 0.5778,
+      "ci": [
+        0.5111,
+        0.6222
+      ]
+    },
+    {
+      "name": "left-branching",
+      "f1": 0.2049,
+      "ci": [
+        0.2,
+        0.2123
+      ]
+    },
+    {
+      "name": "random bracketing",
+      "f1": 0.2099,
+      "ci": [
+        0.1632,
+        0.26
+      ]
+    }
+  ],
+  "by_length": [
+    {
+      "len": 8,
+      "n": 7,
+      "f1_sub": 0.8,
+      "f1_rb": 0.6
+    }
+  ],
+  "rank_curve": [
+    {
+      "frac_spans": 0.0,
+      "recall_gold": 0.0
+    },
+    {
+      "frac_spans": 0.04,
+      "recall_gold": 0.4802
+    },
+    {
+      "frac_spans": 0.08,
+      "recall_gold": 0.75
+    },
+    {
+      "frac_spans": 0.12,
+      "recall_gold": 0.9722
+    },
+    "..."
+  ],
+  "meta": {
+    "model": "FakeSpanScorer (illustrative)",
+    "date": "<varies per run>",
+    "n_items": 9,
+    "notes": "inducer=greedy; policy=min over {it, there, did, then}; cost=mean log-prob per token; random=10 trees/sentence; micro F1=0.804; gap vs RB=+0.230 [+0.200, +0.286]; rank area=0.948; docs example: a scorer that knows the gold tree; not a model"
+  },
+  "diagnostics": {
+    "conventions": "traces and punctuation removed, unaries collapsed, unlabelled spans, single words and whole sentence excluded",
+    "inducer": "greedy",
+    "policy": "min over {it, there, did, then}",
+    "normalisation": "mean",
+    "n_random": 10,
+    "seed": 0,
+    "n_boot": 1000,
+    "micro": {
+      "n_match": 39,
+      "n_pred": 58,
+      "n_gold": 39,
+      "f1": 0.8041
+    },
+    "gap_vs_rb": {
+      "diff": 0.2296,
+      "ci": [
+        0.2,
+        0.2864
+      ]
+    },
+    "gap_vs_lb": {
+      "diff": 0.6025,
+      "ci": [
+        0.5852,
+        0.6222
+      ]
+    },
+    "gap_vs_random": {
+      "diff": 0.5975,
+      "ci": [
+        0.5442,
+        0.6464
+      ]
+    },
+    "rank_area": 0.9481,
+    "n_empty_gold": 0,
+    "n_unmatched_tables": 0,
+    "n_failed_variants": 0,
+    "per_sentence": [
+      {
+        "id": "theory-doc",
+        "len": 13,
+        "n_gold": 7,
+        "n_pred": 11,
+        "n_match": 7,
+        "f1_sub": 0.7778,
+        "f1_rb": 0.3333,
+        "f1_lb": 0.2222,
+        "f1_random": 0.1889
+      },
+      {
+        "id": "hand-1",
+        "len": 8,
+        "n_gold": 4,
+        "n_pred": 6,
+        "n_match": 4,
+        "f1_sub": 0.8,
+        "f1_rb": 0.6,
+        "f1_lb": 0.2,
+        "f1_random": 0.26
+      },
+      {
+        "id": "hand-2",
+        "len": 7,
+        "n_gold": 4,
+        "n_pred": 5,
+        "n_match": 4,
+        "f1_sub": 0.8889,
+        "f1_rb": 0.6667,
+        "f1_lb": 0.2222,
+        "f1_random": 0.2
+      },
+      {
+        "id": "hand-1-copy0",
+        "len": 8,
+        "n_gold": 4,
+        "n_pred": 6,
+        "n_match": 4,
+        "f1_sub": 0.8,
+        "f1_rb": 0.6,
+        "f1_lb": 0.2,
+        "f1_random": 0.12
+      },
+      "..."
+    ]
+  }
+}

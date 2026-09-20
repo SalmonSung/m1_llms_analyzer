@@ -1,0 +1,92 @@
+site_name: m1_llms_analyzer
+site_description: Hidden-state extraction and sentence-structure experiments on Hugging Face models, driven from Colab.
+site_url: https://salmonsung.github.io/m1_llms_analyzer/
+repo_url: https://github.com/SalmonSung/m1_llms_analyzer
+repo_name: SalmonSung/m1_llms_analyzer
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+
+# `mkdocs serve` reloads when the root documents that the stubs include change.
+watch:
+  - README.md
+  - architecture.md
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      # Paths are resolved from the repo root, so the stubs can include README.md and
+      # architecture.md, and the task pages can include docs/assets/examples/*.
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# A page under docs/ that is missing from `nav`, or a broken internal link, fails
+# `mkdocs build --strict` (the CI gate) instead of slipping through as INFO.
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Tasks:
+      - tasks/index.md
+      - Hidden-state extraction: tasks/extraction.md
+      - Task 1b - bracket induction: tasks/task_1b.md
+      - Task 9a - omittability by splicing: tasks/task_9a.md
+      - Task 9b - does the deletion change the text: tasks/task_9b.md
+  - Maintainers:
+      - Architecture: architecture.md
+      - Services and request flows: maintainers/services.md
+      - Extending and maintaining: maintainers/extending.md
+      - Design decisions: design_decisions.md
+      - Edge cases: edge_cases.md

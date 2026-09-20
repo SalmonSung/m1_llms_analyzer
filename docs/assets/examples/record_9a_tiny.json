@@ -1,0 +1,254 @@
+{
+  "cuts": [
+    {
+      "pair": "far",
+      "grammatical": true,
+      "seg_len": 28,
+      "divergence": 0.5773,
+      "audited": false,
+      "paragraph": "hand-0",
+      "i": 9,
+      "j": 37,
+      "boundary": "sentence",
+      "endpoint_distance": 0.6628,
+      "stratum": "10–29 tokens",
+      "fluency": 3.6833,
+      "del_surp": 102.7581,
+      "del_surp_mean": 3.6699
+    },
+    {
+      "pair": "close",
+      "grammatical": true,
+      "seg_len": 7,
+      "divergence": 0.5484,
+      "audited": false,
+      "paragraph": "hand-0",
+      "i": 16,
+      "j": 23,
+      "boundary": "sentence",
+      "endpoint_distance": 0.3213,
+      "stratum": "1–9 tokens",
+      "fluency": 3.6822,
+      "del_surp": 25.72,
+      "del_surp_mean": 3.6743
+    },
+    {
+      "pair": "close",
+      "grammatical": true,
+      "seg_len": 21,
+      "divergence": 0.6017,
+      "audited": false,
+      "paragraph": "hand-0",
+      "i": 16,
+      "j": 37,
+      "boundary": "sentence",
+      "endpoint_distance": 0.2345,
+      "stratum": "10–29 tokens",
+      "fluency": 3.6712,
+      "del_surp": 77.0706,
+      "del_surp_mean": 3.67
+    },
+    "..."
+  ],
+  "divergence_measure": "median over k = 0..window-1 of the L2 distance between the spliced text's next-token log-probability vector at position i+1+k and the original text's at position j+1+k",
+  "window": 5,
+  "strata": [
+    {
+      "label": "1–9 tokens",
+      "lo": 1,
+      "hi": 10,
+      "n_total": 38,
+      "n_close": 4,
+      "n_far": 4,
+      "median_seg_len_close": 7.0,
+      "median_seg_len_far": 6.0,
+      "median_close": 0.5745,
+      "median_far": 0.5229,
+      "ratio": 0.9102,
+      "p_mannwhitney": 0.994,
+      "usable": true
+    },
+    {
+      "label": "10–29 tokens",
+      "lo": 10,
+      "hi": 30,
+      "n_total": 84,
+      "n_close": 10,
+      "n_far": 10,
+      "median_seg_len_close": 21.0,
+      "median_seg_len_far": 21.0,
+      "median_close": 0.5661,
+      "median_far": 0.5696,
+      "ratio": 1.0062,
+      "p_mannwhitney": 0.3382,
+      "usable": true
+    },
+    {
+      "label": "30–79 tokens",
+      "lo": 30,
+      "hi": 80,
+      "n_total": 32,
+      "n_close": 4,
+      "n_far": 4,
+      "median_seg_len_close": 40.0,
+      "median_seg_len_far": 43.0,
+      "median_close": 0.586,
+      "median_far": 0.4809,
+      "ratio": 0.8206,
+      "p_mannwhitney": 0.994,
+      "usable": true
+    }
+  ],
+  "stratified": {
+    "ratio": 0.9404,
+    "ci": [
+      0.9077,
+      1.0016
+    ],
+    "p": 0.9804,
+    "test": "stratified permutation test: stratum-size-weighted mean of log(median far / median close) over length strata, close/far labels shuffled within length-matching bins, one-sided (far > close)",
+    "n_perm": 50,
+    "n_boot": 20,
+    "min_per_group": 1,
+    "match_width": 10,
+    "n_paragraphs": 6,
+    "n_close": 18,
+    "n_far": 18
+  },
+  "pooled": {
+    "n_close": 16,
+    "n_far": 16,
+    "median_close": 0.5691,
+    "median_far": 0.5316,
+    "ratio": 0.9341,
+    "p_mannwhitney": 0.9664,
+    "median_seg_len_close": 17.5,
+    "median_seg_len_far": 16.5,
+    "note": "pooled deciles with unmatched segment lengths; length-confounded, NOT the pass criterion"
+  },
+  "audit": {
+    "n_audited": 0,
+    "n_failed": 0,
+    "failed": [],
+    "by_pair": {
+      "close": {
+        "n": 0,
+        "failed": 0
+      },
+      "far": {
+        "n": 0,
+        "failed": 0
+      },
+      "other": {
+        "n": 0,
+        "failed": 0
+      }
+    },
+    "loaded": false
+  },
+  "meta": {
+    "model": "tiny random GPT-2 (illustrative)",
+    "date": "<varies per run>",
+    "n_items": 36,
+    "notes": "boundary=sentence; splitter=regex; decile=0.1; match_width=10; strata=[[1, 10], [10, 30], [30, 80]]; stratified ratio=0.940 p=0.9804; 3/3 strata usable (>= 1 per group); pooled ratio=0.934 (length-confounded); audit not loaded"
+  },
+  "diagnostics": {
+    "n_paragraphs": 6,
+    "n_cuts": 154,
+    "n_primary_cuts": 154,
+    "n_outside_strata": 0,
+    "n_unlabelled_in_small_bins": 2,
+    "n_not_retokenising": 0,
+    "n_rejected_boundaries": 0,
+    "seg_len_range": [
+      4,
+      51
+    ],
+    "boundary_check": {
+      "n_endpoints_checked": 46,
+      "n_endpoints_not_followed_by_a_sentence": 0,
+      "n_cuts_affected": 0,
+      "n_cuts": 154,
+      "by_pair": {
+        "close": {
+          "n": 18,
+          "affected": 0,
+          "rate": 0.0
+        },
+        "far": {
+          "n": 18,
+          "affected": 0,
+          "rate": 0.0
+        }
+      },
+      "examples": [],
+      "clean": true
+    },
+    "continuous": {
+      "n": 154,
+      "spearman_seg_div": -0.0118,
+      "spearman_dist_div": -0.1929,
+      "spearman_seg_dist": -0.0143,
+      "spearman_resid_dist_resid_div": -0.1972,
+      "resid_median_close": 0.0474,
+      "resid_median_far": 0.0162,
+      "spearman_fluency_delta_div": -0.256,
+      "spearman_del_surp_div": -0.0237,
+      "spearman_del_surp_seg": 0.9975,
+      "spearman_del_surp_dist": -0.0253,
+      "partial_spearman_dist_div_given_logseg_del_surp": -0.1862
+    },
+    "secondary_boundaries": {},
+    "preregistration": {
+      "schema": 2,
+      "task": "9a",
+      "window": 5,
+      "divergence_measure": "median over k = 0..window-1 of the L2 distance between the spliced text's next-token log-probability vector at position i+1+k and the original text's at position j+1+k",
+      "distance_measure": "L2 distance between the original text's next-token log-probability vectors at the two endpoint positions i and j",
+      "splitter": "regex",
+      "boundary_rule": "sentence-final: terminal punctuation (+ closers), the token ends exactly there, whitespace follows, AND the text after it begins a new sentence (right-side check, schema 2)",
+      "boundary_kinds": [
+        "sentence",
+        "clause"
+      ],
+      "primary_boundary": "sentence",
+      "strata": [
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          30
+        ],
+        [
+          30,
+          80
+        ]
+      ],
+      "decile": 0.1,
+      "match_width": 10,
+      "splice": "token ids: ids[:i+1] + ids[j+1:]; states are float32 log-softmax vectors",
+      "surprisal_measure": "-log p of the actual next token from the original-text pass, float32 log-softmax, same BOS/indexing as states",
+      "model_id": "tiny random GPT-2 (illustrative)"
+    },
+    "seed": 0,
+    "surprisal": {
+      "n_paragraphs": 6,
+      "n_with_surprisal": 6,
+      "n_missing": 0,
+      "n_cuts": 154,
+      "n_bad_paragraph_length": 0,
+      "n_bad_cut_length": 0,
+      "n_null_token0": 0,
+      "max_abs_mean_all_minus_fluency": 0.0,
+      "n_within_tol_all": 6,
+      "max_abs_mean_from_1_minus_fluency": 0.0014,
+      "n_within_tol_from_1": 4,
+      "max_abs_del_surp_minus_sum": 0.0,
+      "tol": 0.001,
+      "fluency_definition": "fluency = mean of surprisal over ALL scored tokens: with a BOS prepended (bos_policy='auto') that is every token including token 0 predicted from BOS, so mean(surprisal) reproduces fluency and mean(surprisal[1:]) does not; under bos_policy='none' token 0 is unscored (null) and the two agree",
+      "ok": true
+    }
+  }
+}

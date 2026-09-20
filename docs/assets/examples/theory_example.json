@@ -1,0 +1,52 @@
+{
+  "id": "theory-doc",
+  "source": "hand parse (theory doc)",
+  "words": [
+    "The",
+    "tall",
+    "man",
+    "with",
+    "the",
+    "red",
+    "hat",
+    "quickly",
+    "opened",
+    "the",
+    "heavy",
+    "wooden",
+    "door"
+  ],
+  "text": "The tall man with the red hat quickly opened the heavy wooden door",
+  "gold_spans": [
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      6
+    ],
+    [
+      3,
+      6
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      7,
+      12
+    ],
+    [
+      8,
+      12
+    ],
+    [
+      9,
+      12
+    ]
+  ],
+  "gold_brackets": "[[The tall man] [with [the red hat]]] [quickly [opened [the heavy wooden door]]]",
+  "conventions": "spans are (first_word, last_word) inclusive, 0-based, over `words`; traces (-NONE-) and punctuation tags removed with any node they empty; unaries collapsed (gold is a set); labels dropped (unlabelled scoring); single words and the whole sentence excluded"
+}

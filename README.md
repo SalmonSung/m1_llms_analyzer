@@ -17,6 +17,10 @@ microservices, driven from Google Colab notebooks.
   (omittability by splicing, length-matched, with a hand audit) and Task 9b (does the deletion
   change the generated text?) end to end, each with a resumable cache. See [Experiments](#experiments).
 
+**Documentation site:** [salmonsung.github.io/m1_llms_analyzer](https://salmonsung.github.io/m1_llms_analyzer/) —
+one page per task with the files it uses, a pipeline diagram, how the data is collected and
+worked examples, plus the architecture and maintainer docs.
+
 ---
 
 ## Use it from Colab (the intended path)
@@ -25,10 +29,10 @@ microservices, driven from Google Colab notebooks.
 
    | Secret | Required | What it is |
    |---|---|---|
-   | `GITHUB_TOKEN` | **Yes** (this repo is private) | GitHub fine-grained PAT with *Contents: Read* on this repo — [create one](https://github.com/settings/personal-access-tokens/new) |
+   | `GITHUB_TOKEN` | **Yes** (the bootstrap cell clones with it; required while the repo is private) | GitHub fine-grained PAT with *Contents: Read* on this repo — [create one](https://github.com/settings/personal-access-tokens/new) |
    | `HF_TOKEN` | Only for gated models | Hugging Face read token — [create one](https://huggingface.co/settings/tokens) |
 
-2. **Open [`notebooks/colab_entrypoint.ipynb`](notebooks/colab_entrypoint.ipynb)**, copy it
+2. **Open [`notebooks/colab_entrypoint.ipynb`](https://github.com/SalmonSung/m1_llms_analyzer/blob/main/notebooks/colab_entrypoint.ipynb)**, copy it
    into Colab (or `File → Upload notebook`), and hit **Runtime → Run all**.
 
 That is the whole setup. The notebook clones this repo, installs its dependencies, runs a
@@ -302,11 +306,24 @@ When a run exceeds `npy_threshold_floats` (1M by default), `values` becomes `nul
 
 ## Docs
 
-| File | What is in it |
+The docs are a website: **[https://salmonsung.github.io/m1_llms_analyzer/](https://salmonsung.github.io/m1_llms_analyzer/)**.
+
+| Page | What is in it |
 |---|---|
-| [`architecture.md`](architecture.md) | Structure tree, every file's responsibility, request flow, extension points |
-| [`docs/design_decisions.md`](docs/design_decisions.md) | Every undiscussed choice and its reasoning, plus what is deliberately not built |
-| [`docs/edge_cases.md`](docs/edge_cases.md) | 30 handled edge cases with the code that handles each, and the known limits |
+| [Tasks](https://salmonsung.github.io/m1_llms_analyzer/tasks/) | Each pipeline (extraction, Task 1b, 9a, 9b): the `.py` files it uses, a diagram, how the data is collected, outputs, worked examples |
+| [Architecture](https://salmonsung.github.io/m1_llms_analyzer/architecture/) | Structure tree, every file's responsibility, request flows, extension points (the source is [`architecture.md`](https://github.com/SalmonSung/m1_llms_analyzer/blob/main/architecture.md)) |
+| [Services and request flows](https://salmonsung.github.io/m1_llms_analyzer/maintainers/services/) | The Protocols, the wiring, one sequence per request path, module map |
+| [Design decisions](https://salmonsung.github.io/m1_llms_analyzer/design_decisions/) | Every undiscussed choice and its reasoning, plus what is deliberately not built |
+| [Edge cases](https://salmonsung.github.io/m1_llms_analyzer/edge_cases/) | 30 handled edge cases with the code that handles each, and the known limits |
+
+Build it locally:
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve                              # http://127.0.0.1:8000, live reload
+mkdocs build --strict                     # what the docs workflow runs before deploying
+python scripts/make_doc_examples.py       # regenerate docs/assets/examples/ (torch optional)
+```
 
 ## Tests
 

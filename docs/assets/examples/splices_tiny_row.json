@@ -1,0 +1,76 @@
+{
+  "kind": "paragraph",
+  "id": "hand-0",
+  "text": "The quick brown fox jumps over the lazy dog. The dog jumps over the fox. The fox jumps over the model. The model jumps over the layer. The layer jumps over the state. The state jumps over the token. The token jumps over the text. The text jumps over the dog.",
+  "source": "hand",
+  "info": {
+    "index": 0
+  },
+  "n_tokens": 59,
+  "boundaries": {
+    "sentence": [
+      9,
+      16,
+      23,
+      30,
+      "..."
+    ],
+    "clause": []
+  },
+  "n_rejected_boundaries": 0,
+  "cuts": [
+    {
+      "i": 9,
+      "j": 16,
+      "boundary": "sentence",
+      "seg_len": 7,
+      "char_i": 44,
+      "char_j": 72,
+      "d": 0.5819,
+      "div": 0.5483,
+      "div_k": [
+        0.7272,
+        0.48,
+        0.5483,
+        0.4197,
+        "..."
+      ],
+      "fl": 3.6829,
+      "retokenises": true,
+      "join": "The quick brown fox jumps over the lazy dog . ⟦cut⟧ The fox jumps over the model . The model jumps over the",
+      "del_surp": 25.6876,
+      "del_surp_mean": 3.6697
+    },
+    {
+      "i": 9,
+      "j": 23,
+      "boundary": "sentence",
+      "seg_len": 14,
+      "char_i": 44,
+      "char_j": 102,
+      "d": 0.4711,
+      "div": 0.5744,
+      "div_k": [
+        0.5751,
+        0.4918,
+        0.5339,
+        0.5744,
+        "..."
+      ],
+      "fl": 3.6843,
+      "retokenises": true,
+      "join": "The quick brown fox jumps over the lazy dog . ⟦cut⟧ The model jumps over the layer . The layer jumps over the",
+      "del_surp": 51.4076,
+      "del_surp_mean": 3.672
+    },
+    "..."
+  ],
+  "fluency": 3.6797,
+  "surprisal": [
+    3.6553,
+    3.7405,
+    3.7132,
+    3.7218,
+    "..."
+  ]
+}
