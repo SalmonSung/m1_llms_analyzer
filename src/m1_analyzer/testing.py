@@ -14,6 +14,7 @@ outputs are meaningless numbers -- it tests plumbing, not model quality.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 #: Shape of the model `build_tiny_local_model` produces. Tests assert against these, so
 #: they live here rather than in `tests/conftest.py`: a test module importing
@@ -43,11 +44,15 @@ def build_tiny_local_model(
     num_layers: int = TINY_LAYERS,
     hidden_size: int = TINY_HIDDEN,
     max_positions: int = TINY_MAX_POSITIONS,
+    extra_vocab: Sequence[str] = (),
 ) -> str:
     """Create a tiny GPT-2 model + tokenizer on disk. Returns the directory path.
 
     The directory is a drop-in ``model_id`` for `ModelConfig`, because
     `from_pretrained` accepts a local path exactly like a Hub repo name.
+    `extra_vocab` appends words to the word-level vocabulary (duplicates
+    ignored), so an experiment whose items must be spelled one token per word
+    -- Task 8a's frames -- can run on the tiny model instead of seeing ``[UNK]``.
     """
     import torch
     from tokenizers import Tokenizer, models, pre_tokenizers
@@ -56,7 +61,9 @@ def build_tiny_local_model(
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
 
-    vocab = {token: i for i, token in enumerate(DEFAULT_VOCAB)}
+    words = list(DEFAULT_VOCAB) + [w for w in extra_vocab if w not in set(DEFAULT_VOCAB)]
+    words = list(dict.fromkeys(words))
+    vocab = {token: i for i, token in enumerate(words)}
     backend = Tokenizer(models.WordLevel(vocab=vocab, unk_token="[UNK]"))
     backend.pre_tokenizer = pre_tokenizers.Whitespace()
     tokenizer = PreTrainedTokenizerFast(

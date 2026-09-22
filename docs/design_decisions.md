@@ -456,6 +456,53 @@ and any older record still draw.
 
 ---
 
+## Experiments (Task 8a)
+
+### The generator is copied verbatim, and the frames are filtered on every tokenizer first
+
+The request supplies the item generator; `frames_8a.py` carries it between `BEGIN` / `END`
+markers unmodified and the record's `meta.generator` says so, because the templates are
+the report's and the teaching document's. All seven tokenizers are loaded before a single
+frame is drawn (phase 0, a few MB each), so the 200 frames are identical across models and
+whatever differs between models is the model. The frames file's sha256 sits in every cache
+header and is checked on merge.
+
+### The prefix ids are the tokenizer's default, and the state service adds nothing
+
+The frame filter counts tokens with each tokenizer's default `add_special_tokens`; the model
+sees exactly those ids (a BOS for Llama and Gemma, none for Qwen or gpt-oss), the state read
+at the last id, and `bos_added` is recorded per model. The state service therefore runs under
+`bos_policy="none"` and `score_frames_batch` refuses any other policy: a second BOS would be
+counted on neither side of the assertion and would move every state.
+
+### The anchor gates everything
+
+Before the 200 frames are scored, Qwen2.5-0.5B must reproduce the local run's 30 frames
+(`data/frames_8a_local30.json`, committed and never written) row by row: 2 % on `ret` and
+`ctrl`, 0.01 on the verb masses. The rows' `n_tok` / `stop_tok` are compared before any
+forward pass, so a BOS or trailing-space drift is named without a GPU; a failure raises
+`SystemExit` with `anchor_diagnosis`, which re-scores the worst row with a trailing space and
+with a prepended BOS / EOS and says which reproduces the local value. The seven-model numbers
+are only comparable to the report's if this passes, so nothing proceeds otherwise.
+
+### One model per runtime, one cache per model, a CPU merge
+
+Gemma-4-31B in bf16 is ~62 GB and gpt-oss-20b dequantises to ~42 GB off Hopper; the seven
+models do not share a Colab session. Phase A therefore writes `scores_8a_<key>.jsonl` per
+model (one fsynced line per frame, all fourteen passes, resumable), and phase B merges
+whichever caches exist into the record from any runtime, listing the models still missing.
+`ModelConfig.device_map` is the one service change: with it, `from_pretrained` streams the
+shards to the GPU and the model is never moved again; without it, nothing changes.
+
+### The record holds raw rows and no verdict
+
+`ret` and `ctrl` are written in the model's own log-probability space, nothing normalised;
+the geometric-mean ratios, frame-clustered bootstrap intervals, sign and Wilcoxon tests are
+computed from the record outside the repository, exactly as for the local run. The `tokens`
+table (`n_tok`, `last_tok` per pass) is in the record so both assertions can be re-checked
+without the tokenizers; `validate_record_8a` does exactly that, plus every count and range.
+Full-precision floats are kept: the anchor tolerances are tight.
+
 ## Storage
 
 ### JSON is the index; the `.npz` sidecar holds the bulk

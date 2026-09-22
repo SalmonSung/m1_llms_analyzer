@@ -4,7 +4,7 @@ title: Tasks at a glance
 
 # The pipelines at a glance
 
-This repository runs one plain pipeline (hidden-state extraction) and three numbered
+This repository runs one plain pipeline (hidden-state extraction) and four numbered
 experiments on the same loaded model. Every one of them is a Colab notebook that clones
 this repo and calls into the `m1_analyzer` package; the notebooks hold configuration and
 glue, the package holds the logic.
@@ -15,6 +15,7 @@ glue, the package holds the logic.
 | [Task 1b](task_1b.md) | Does substitution cost *find* constituents? | `experiment_1b.ipynb` | `load_ptb_nltk` → `compute_span_costs` → `analyse_1b` → `fig_1b` | NLTK Penn Treebank sample (gold brackets) | `span_costs_*.jsonl`, `record_1b_*.json`, `fig_1b_*.png`, `fig_0c_*.png` |
 | [Task 9a](task_9a.md) | Do cuts between *close* endpoint states change what follows less than cuts between *far* ones? | `experiment_9a.ipynb` | `load_wikipedia_paragraphs` → `compute_splices` → `add_surprisal` → audit → `analyse_9a` → `fig_9a` | Streamed English Wikipedia paragraphs | `paragraphs_*.jsonl`, `splices_*.jsonl`, `audit_*.csv`, `record_9a_*.json`, `fig_9a_*.png` |
 | [Task 9b](task_9b.md) | Does the deletion change what the model *writes*, not only what it predicts? | `experiment_9b.ipynb` | `load_9a_inputs` → `compute_generation_9b` → `build_record_9b` | Task 9a's record and cache (read-only) | `gen_9b_*.jsonl`, `record_9b_*.json` (no figure) |
+| [Task 8a](task_8a.md) | Does the clause-return effect (Act 8) hold on seven models, on one shared 200-frame item set? | `experiment_8a.ipynb` | `load_tokenizers` → `generate_frames_8a` → `anchor_check` → `score_model_8a` → `build_record_8a` | Generated frames (seed 8, filtered on all seven tokenizers); the committed anchor file | `frames_8a_seed8.json`, `scores_8a_<key>.jsonl`, `anchor_8a.json`, `record_8a_multimodel.json` (no figure) |
 
 ## How is the data collected?
 
@@ -24,10 +25,11 @@ glue, the package holds the logic.
 | Task 1b | The free NLTK Penn Treebank sample (10 % of WSJ, 3 914 parsed sentences), downloaded once with `nltk.download("treebank")` | `treebank.load_ptb_nltk(n, min_len, max_len, seed)`: seeded sample of eligible sentences, gold brackets derived from the trees | Every cache row carries the sentence, its gold spans and its bracketed tree, so phase B needs no treebank |
 | Task 9a | English Wikipedia, `wikimedia/wikipedia` `20231101.en`, **streamed** through `datasets` (no bulk download) | `paragraphs.load_wikipedia_paragraphs(count_tokens, n, ...)`: clean → token-count and sentence-count filter → seeded sample from a pool | `paragraphs_<RUN_TAG>.jsonl` pins the draw; the notebook's *Pin the corpus* cell restores it by id on a later run |
 | Task 9b | Nothing new: Task 9a's `record_9a_*.json` (the labelled cuts) and `splices_*.jsonl` (texts and per-token surprisal) | `task_9b.load_9a_inputs(record, cache)`, sha256 of both stamped into the 9b cache header | The 9a files are never written to |
+| Task 8a | Generated, not downloaded: `frames_8a.generate_frames_8a(tokenizers, n=200, seed=8)` draws frames from word pools and keeps only those passing the token assertions in **all seven** tokenizers; plus the committed `data/frames_8a_local30.json` (the local run's 30 frames and Qwen2.5-0.5B rows) as the anchor | `task_8a.load_tokenizers` (phase 0) then the generator; `task_8a.load_anchor_file` | `frames_8a_seed8.json` pins the draw; its sha256 is in every model's cache header and checked on merge |
 
 ## The shared notebook skeleton
 
-All four notebooks have the same shape, so once you have read one you can read the others:
+All five notebooks have the same shape, so once you have read one you can read the others:
 
 1. **Bootstrap**: clone or update the repo with a `GITHUB_TOKEN` Colab secret, scrub the token from `.git/config`.
 2. **Dependencies**: `pip install` with `--upgrade-strategy only-if-needed`, so Colab's CUDA-matched torch stays.
@@ -53,6 +55,7 @@ Every output file is keyed by what produced it, so two runs never share a cache:
 | 1b | `slug(MODEL_ID)_slug(POLICY.name)` | `span_costs_Qwen-Qwen3-0.6B-Base_min-over-it-there-did-then-.jsonl` |
 | 9a | `slug(MODEL_ID)_slug(CORPUS)_w<WINDOW>` | `splices_Qwen-Qwen3-0.6B-Base_wikipedia_w20.jsonl` |
 | 9b | the same tag as 9a, so the 9a files are found by name | `gen_9b_Qwen-Qwen3-0.6B-Base_wikipedia_w20.jsonl` |
+| 8a | `8a_<MODEL_KEY>`; the caches are keyed by the model key, the frames file and record are shared | `scores_8a_qwen3_8b.jsonl`, `record_8a_multimodel.json` |
 
 `slug` replaces anything that is not `[A-Za-z0-9._-]` with `-`.
 

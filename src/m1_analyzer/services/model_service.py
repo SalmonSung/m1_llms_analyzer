@@ -23,6 +23,14 @@ transformer, hidden states only) and ``"causal_lm"`` loads
 log-probabilities can be scored). A causal-LM model still returns hidden
 states, so extraction works with either; the base head is simply lighter.
 
+Placement
+---------
+By default the model is loaded on the CPU and moved to the resolved device.
+``ModelConfig.device_map`` (e.g. ``"auto"``) instead hands placement to
+accelerate at load time, so a checkpoint larger than the CPU RAM streams
+straight to the GPU(s); the reported ``device`` is then where the first
+parameter landed. Task 8a's 20B and 31B models need this in Colab.
+
 Multimodal (vision + text) models
 ---------------------------------
 Composite checkpoints such as Gemma 3/4, Llama-3.2-Vision or Qwen-VL carry a
@@ -121,19 +129,31 @@ class ModelService:
         self._device = resolve_device(self.config.device)
         self._dtype = resolve_dtype(self._device, self.config.dtype)
 
+        placement: dict[str, Any] = {}
+        if self.config.device_map is not None:
+            # accelerate streams the shards onto the target device(s); the CPU never
+            # holds the whole model, which a 20-60 GB checkpoint needs in Colab.
+            placement = {"device_map": self.config.device_map, "low_cpu_mem_usage": True}
         try:
             self._model = loader.from_pretrained(
-                self.config.model_id, config=hf_config, dtype=self._dtype, **common
+                self.config.model_id, config=hf_config, dtype=self._dtype, **common, **placement
             )
         except TypeError:
             # transformers < 4.56 spells the argument `torch_dtype`.
             self._model = loader.from_pretrained(
-                self.config.model_id, config=hf_config, torch_dtype=self._dtype, **common
+                self.config.model_id, config=hf_config, torch_dtype=self._dtype, **common, **placement
             )
         except Exception as exc:  # noqa: BLE001
             raise self._explain_load_failure(exc) from exc
 
-        self._model.to(self._device)
+        if placement:
+            # The map decided where the weights live; report that, do not move them again.
+            try:
+                self._device = str(next(self._model.parameters()).device)
+            except StopIteration:  # pragma: no cover - a model with no parameters
+                pass
+        else:
+            self._model.to(self._device)
         self._model.eval()
 
         self._ensure_pad_token()
@@ -445,6 +465,7 @@ class ModelService:
             "num_hidden_layers": self.num_hidden_layers,
             "hidden_size": self.hidden_size,
             "device": self._device,
+            "device_map": self.config.device_map,
             "dtype": str(self._dtype).replace("torch.", ""),
             "context_length": self._model_context_length(),
             "pad_token_substituted": self._pad_token_added,

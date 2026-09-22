@@ -33,6 +33,7 @@ until `nltk.download("treebank")` has run once.
 | **A new experiment task** | New `experiments/task_<id>.py` producing the record its `fig_<id>` docstring in `experiment_figures.py` specifies; reuse `jsonl_cache.py`, `stats.py`, and the 1b / 9a building blocks; a notebook copied from `experiment_1b.ipynb` or `experiment_9a.ipynb`; a page under `docs/tasks/` |
 | A state-level experiment (distances between next-token vectors) | `analyzer.states.states(ids, positions)`; see `experiments/splice.py` for the alignment bookkeeping |
 | A generation experiment (text after a context) | `experiments/decoding.py` with `analyzer.models` as the provider; see `experiments/task_9b.py` for the per-cut driver, cache and record |
+| A multi-model experiment (the same items on several checkpoints) | `experiments/task_8a.py`: a `MODELS_8A`-style registry, a tokenizer-only phase 0 that pins the items, one resumable cache per model, a CPU merge from any runtime; `ModelConfig(device_map="auto")` for checkpoints larger than the CPU RAM |
 | Another treebank (Universal Dependencies) | `experiments/treebank.py` (`load_ud_conllu` is a documented stub: subtree yields → spans, drop non-projective); name the conversion in the record's `treebank` field |
 | Another replacement policy | A class satisfying `ReplacementPolicy` in `experiments/proforms.py`; if its proforms are a subset of a cache's header, phase B alone suffices |
 
@@ -117,5 +118,5 @@ Pages must be set to **Source: GitHub Actions** once, under the repository's
 
 See [Deliberately not built yet](../design_decisions.md#deliberately-not-built-yet) for
 the list and the reasoning: no HTTP between services, no YAML configuration, no
-encoder-decoder support, no attention extraction, no exact torch pin, and the Task 9b
-analysis kept outside the repository.
+encoder-decoder support, no attention extraction, no exact torch pin, and the Task 9b and
+Task 8a analyses kept outside the repository.

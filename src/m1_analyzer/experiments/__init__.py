@@ -7,8 +7,13 @@ Task 9a -- phase A: `compute_splices` scores every admissible cut of every
 paragraph; phase B: `analyse_9a` builds the `fig_9a` record after the hand
 audit. Task 9b -- `compute_generation_9b` scores the author's continuation and
 samples continuations from the original and spliced contexts of every labelled
-9a cut; `build_record_9b` turns that cache into the Task 9b record. See
-notebooks/experiment_1b.ipynb, experiment_9a.ipynb and experiment_9b.ipynb.
+9a cut; `build_record_9b` turns that cache into the Task 9b record. Task 8a --
+phase 0: `generate_frames_8a` draws one clause-return frame list filtered on
+every model's tokenizer; phase A: `score_model_8a` scores one model's fourteen
+passes per frame into a cache; phase B: `build_record_8a` merges the model
+caches and the `anchor_check` into the multi-model record. See
+notebooks/experiment_1b.ipynb, experiment_9a.ipynb, experiment_9b.ipynb and
+experiment_8a.ipynb.
 """
 
 from . import experiment_figures
@@ -79,6 +84,43 @@ from .task_9b import (
     score_cut,
     validate_record_9b,
 )
+from .frames_8a import (
+    CODES as CODES_8A,
+    FRAME_WORDS_8A,
+    PAIRS as PAIRS_8A,
+    VERB_POOL_8A,
+    format_sentence,
+    frames_sha256,
+    generate_frames_8a,
+    load_frames_8a,
+    save_frames_8a,
+    split_sentence,
+    token_assertions,
+    token_table,
+    verb_pool_kept,
+)
+from .task_8a import (
+    ANCHOR_KEY,
+    MODELS_8A,
+    SMALL_KEYS,
+    AnchorSet,
+    ModelSpec,
+    anchor_check,
+    anchor_diagnosis,
+    anchor_summary,
+    anchor_tokens_check,
+    build_record_8a,
+    load_anchor_file,
+    load_scores_8a,
+    load_tokenizers,
+    missing_models,
+    model_block,
+    model_meta_8a,
+    rows_from_frame,
+    score_frames_batch,
+    score_model_8a,
+    validate_record_8a,
+)
 from .proforms import (
     DEFAULT_PROFORMS, DELETION, ByLengthClass, MinOverSet, ReplacementPolicy, parse_policy, substitute,
 )
@@ -132,6 +174,12 @@ __all__ = [
     "EOS_POLICY", "OVERLAP_MEASURE", "GenerationProtocol", "Inputs9a", "build_record_9b", "check_invariants_9b",
     "compute_generation_9b", "cut_specs", "load_9a_inputs", "load_generation_9b", "measure_a", "measure_b",
     "score_cut", "validate_record_9b",
+    "CODES_8A", "FRAME_WORDS_8A", "PAIRS_8A", "VERB_POOL_8A", "format_sentence", "frames_sha256",
+    "generate_frames_8a", "load_frames_8a", "save_frames_8a", "split_sentence", "token_assertions", "token_table",
+    "verb_pool_kept", "ANCHOR_KEY", "MODELS_8A", "SMALL_KEYS", "AnchorSet", "ModelSpec", "anchor_check",
+    "anchor_diagnosis", "anchor_summary", "anchor_tokens_check", "build_record_8a", "load_anchor_file",
+    "load_scores_8a", "load_tokenizers", "missing_models", "model_block", "model_meta_8a", "rows_from_frame",
+    "score_frames_batch", "score_model_8a", "validate_record_8a",
     "DEFAULT_PROFORMS", "DELETION", "ByLengthClass", "MinOverSet", "ReplacementPolicy", "parse_policy",
     "substitute",
     "SpanCostTable", "compute_span_costs", "load_span_costs", "load_span_costs_with_gold", "variant_count",

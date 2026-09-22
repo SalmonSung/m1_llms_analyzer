@@ -206,6 +206,35 @@ both sides of `true_dlogp` share one set of numerics; the 9a cache's `surprisal`
 against, not the input. Samples are drawn from a per-cut `torch.Generator`, so a re-run on the same GPU
 and dtype reproduces them and the global RNGs are never touched.
 
+`notebooks/experiment_8a.ipynb` runs **Task 8a — recursion at scale, across models: the Act 8 test on
+seven models.** After an embedded clause closes (`The soldier that the singer trusted |`), is the model's
+next-token state closer to the bare subject's (`The soldier |`) than a token-matched control's
+(`The singer heard the soldier trusted |`)? The same **200-frame item set** (seed 8, the request's generator
+verbatim, kept only where it passes the token assertions in all seven tokenizers) is scored on Qwen2.5-0.5B
+(the anchor), Qwen3-0.6B/1.7B/8B-Base, Llama-3.1-8B, gpt-oss-20b and Gemma-4-31B, one model per runtime
+into a resumable cache, and merged into one record: per (embedded, control) pair the raw L2 distances
+`ret` and `ctrl` to `REF` in float32 log-probability space, the verb mass and `log P(V)` at every stop,
+and the ten top next tokens after every pass. Before anything is read, Qwen2.5-0.5B must reproduce the
+local run's 30 frames (`data/frames_8a_local30.json`) to 2 %; a failure stops the notebook with a
+diagnosis. The ratios, intervals and tests are computed from the record, outside the repo.
+
+```python
+from m1_analyzer import Analyzer, ModelConfig, RunConfig, ScoringConfig
+from m1_analyzer.experiments import (MODELS_8A, anchor_check, build_record_8a, generate_frames_8a,
+                                     load_tokenizers, save_frames_8a, score_model_8a)
+
+frames = save_frames_8a(generate_frames_8a(load_tokenizers(list(MODELS_8A))), "outputs/task_8a/frames_8a_seed8.json")
+spec = MODELS_8A["qwen25_0.5b"]
+analyzer = Analyzer(RunConfig(model=ModelConfig(model_id=spec.hf_id, head="causal_lm"), scoring=ScoringConfig(bos_policy="none")))
+anchor = anchor_check(analyzer, spec, "data/frames_8a_local30.json")            # must pass first
+header, rows = score_model_8a(analyzer, spec, frames, cache_path="outputs/task_8a/scores_8a_qwen25_0.5b.jsonl")
+record = build_record_8a(frames, {"qwen25_0.5b": "outputs/task_8a/scores_8a_qwen25_0.5b.jsonl"}, anchor=anchor, allow_partial=True)
+```
+
+The prefix ids are `tok(prefix)` with the tokenizer's default special tokens (a BOS for Llama / Gemma, none
+for Qwen), the state read at the last id, so the state service runs with `bos_policy="none"`; the 20B and
+31B checkpoints load with `ModelConfig(device_map="auto")`.
+
 ---
 
 ## Configuration
@@ -310,7 +339,7 @@ The docs are a website: **[https://salmonsung.github.io/m1_llms_analyzer/](https
 
 | Page | What is in it |
 |---|---|
-| [Tasks](https://salmonsung.github.io/m1_llms_analyzer/tasks/) | Each pipeline (extraction, Task 1b, 9a, 9b): the `.py` files it uses, a diagram, how the data is collected, outputs, worked examples |
+| [Tasks](https://salmonsung.github.io/m1_llms_analyzer/tasks/) | Each pipeline (extraction, Task 1b, 9a, 9b, 8a): the `.py` files it uses, a diagram, how the data is collected, outputs, worked examples |
 | [Architecture](https://salmonsung.github.io/m1_llms_analyzer/architecture/) | Structure tree, every file's responsibility, request flows, extension points (the source is [`architecture.md`](https://github.com/SalmonSung/m1_llms_analyzer/blob/main/architecture.md)) |
 | [Services and request flows](https://salmonsung.github.io/m1_llms_analyzer/maintainers/services/) | The Protocols, the wiring, one sequence per request path, module map |
 | [Design decisions](https://salmonsung.github.io/m1_llms_analyzer/design_decisions/) | Every undiscussed choice and its reasoning, plus what is deliberately not built |
