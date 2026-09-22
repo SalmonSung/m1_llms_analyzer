@@ -1,0 +1,169 @@
+{
+  "meta": {
+    "date": "<varies per run>",
+    "seed": 8,
+    "n_frames_requested": 3,
+    "n_frames": 3,
+    "pools": {
+      "pool_nouns": 64,
+      "pool_verbs": 41,
+      "pool_mains": 20,
+      "pool_cvs": 7,
+      "draws": 3
+    },
+    "tokenizers_filtered_on": [
+      "tiny"
+    ],
+    "generator": "the code block above, unmodified"
+  },
+  "verb_pool": [
+    "admired",
+    "answered",
+    "attacked",
+    "became",
+    "..."
+  ],
+  "frames": [
+    {
+      "N1": "clerk",
+      "N2": "wizard",
+      "N3": "captain",
+      "N4": "dancer",
+      "V2": "hated",
+      "V3": "fired",
+      "V4": "ignored",
+      "V": "fixed",
+      "OBJ": "the engine",
+      "CV1": "thought",
+      "CV2": "believed",
+      "CV3": "felt",
+      "sentences": {
+        "REF": "The clerk | fixed the engine.",
+        "ORC": "The clerk that the wizard hated | fixed the engine.",
+        "ORC_A": "The wizard hated the clerk that | fixed the engine.",
+        "ORC_B": "The wizard thought the clerk hated | the engine.",
+        "WHO": "The clerk whom the wizard hated | fixed the engine.",
+        "WHO_B": "The wizard thought the clerk hated | the engine.",
+        "RED": "The clerk the wizard hated | fixed the engine.",
+        "RED_B": "The wizard and captain hated | the engine.",
+        "SRC": "The clerk that hated the wizard | fixed the engine.",
+        "SRC_B": "The clerk quickly hated the wizard |.",
+        "EMB2": "The clerk that the wizard that the captain fired hated | fixed the engine.",
+        "EMB2_B": "The captain believed that the wizard thought the clerk hated | the engine.",
+        "EMB3": "The clerk that the wizard that the captain that the dancer ignored fired hated | fixed the engine.",
+        "EMB3_B": "The dancer felt that the captain believed that the wizard thought the clerk hated | the engine."
+      }
+    },
+    "..."
+  ],
+  "models": {
+    "tiny": {
+      "meta": {
+        "hf_id": "tiny random GPT-2 (illustrative)",
+        "revision": null,
+        "weight_dtype": "float32",
+        "logits_dtype": "float32",
+        "bos_added": false,
+        "n_params_b": 0.0,
+        "vocab_size": 213
+      },
+      "verb_pool_kept": [
+        "admired",
+        "answered",
+        "attacked",
+        "became",
+        "..."
+      ],
+      "tokens": [
+        {
+          "frame": 0,
+          "code": "REF",
+          "n_tok": 2,
+          "last_tok": "clerk"
+        },
+        {
+          "frame": 0,
+          "code": "ORC",
+          "n_tok": 6,
+          "last_tok": "hated"
+        },
+        {
+          "frame": 0,
+          "code": "ORC_A",
+          "n_tok": 6,
+          "last_tok": "that"
+        },
+        {
+          "frame": 0,
+          "code": "ORC_B",
+          "n_tok": 6,
+          "last_tok": "hated"
+        },
+        "..."
+      ],
+      "rows": [
+        {
+          "frame": 0,
+          "structure": "ORC",
+          "control": "ORC_B",
+          "ret": 1.2637,
+          "ctrl": 1.2532,
+          "verbmass_ref": 0.332,
+          "verbmass_emb": 0.3319,
+          "verbmass_ctrl": 0.3319,
+          "logp_V_ref": -5.4372,
+          "logp_V_emb": -5.3853,
+          "logp_V_ctrl": -5.383
+        },
+        {
+          "frame": 0,
+          "structure": "ORC",
+          "control": "ORC_A",
+          "ret": 1.2637,
+          "ctrl": 1.7497,
+          "verbmass_ref": 0.332,
+          "verbmass_emb": 0.3319,
+          "verbmass_ctrl": 0.3232,
+          "logp_V_ref": -5.4372,
+          "logp_V_emb": -5.3853,
+          "logp_V_ctrl": -5.2237
+        },
+        "..."
+      ],
+      "top10": {
+        "0:REF": [
+          [
+            "answered",
+            0.0058
+          ],
+          [
+            "editor",
+            0.0056
+          ],
+          [
+            "One",
+            0.0056
+          ],
+          "..."
+        ],
+        "0:ORC": [
+          [
+            "hated",
+            0.006
+          ],
+          [
+            "described",
+            0.0058
+          ],
+          [
+            "hunter",
+            0.0057
+          ],
+          "..."
+        ],
+        "...": "..."
+      }
+    }
+  },
+  "anchor": null
+}

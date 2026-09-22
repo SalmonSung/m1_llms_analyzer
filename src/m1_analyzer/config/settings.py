@@ -53,6 +53,11 @@ class ModelConfig:
     cache_dir: str | None = None
     #: "base" (hidden states only) or "causal_lm" (adds the LM head for scoring).
     head: str = "base"
+    #: None (default) loads on the CPU and moves the model to `device` afterwards.
+    #: "auto" (or any transformers device map) hands placement to accelerate so a
+    #: 20-60 GB checkpoint streams straight onto the GPU(s) instead of needing as
+    #: much CPU RAM first; `device` is then read from where the weights landed.
+    device_map: str | None = None
 
     def __post_init__(self) -> None:
         if not self.model_id or not self.model_id.strip():

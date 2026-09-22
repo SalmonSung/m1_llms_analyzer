@@ -1,0 +1,41 @@
+{
+  "kind": "header",
+  "schema": 1,
+  "task": "8a",
+  "model_key": "tiny",
+  "hf_id": "tiny random GPT-2 (illustrative)",
+  "revision": null,
+  "weight_dtype": "float32",
+  "logits_dtype": "float32",
+  "bos_added": false,
+  "vocab_size": 213,
+  "n_params_b": 0.0,
+  "base": true,
+  "role": "illustrative",
+  "notes": "",
+  "frames_file": "frames_8a_seed8.json",
+  "frames_sha256": "809cdbafd62aac664a057a6075117f88ae68983a26ad2e236891e2e2c16773a4",
+  "n_frames": 3,
+  "seed": 8,
+  "verb_pool": [
+    "admired",
+    "answered",
+    "attacked",
+    "became",
+    "..."
+  ],
+  "verb_pool_kept": [
+    "admired",
+    "answered",
+    "attacked",
+    "became",
+    "..."
+  ],
+  "distance_measure": "L2 norm of the difference of two float32 log_softmax next-token vectors, each read at the last token of its prefix; ret = ||s_E - s_REF||, ctrl = ||s_C - s_REF||; nothing normalised",
+  "verbmass_measure": "sum of exp(logp) over the ids of ' w' for every verb-pool word w that is a single token",
+  "logp_V_measure": "log_softmax value at the id of ' V' (the frame's main verb), single token by the pool filter",
+  "top10_measure": "the ten highest-probability next tokens after the prefix, as [decoded string, probability]",
+  "top_k": 10,
+  "bos_policy": "tokenizer default: tok(prefix) with its own add_special_tokens; the state service adds nothing",
+  "date": "<varies per run>"
+}

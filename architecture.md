@@ -52,7 +52,9 @@ m1_llms_analyzer/
 │   │   │                          example, knobs, where to look next.
 │   │   ├── task_1b.md             Task 1b, same template.
 │   │   ├── task_9a.md             Task 9a, same template (audit round trip included).
-│   │   └── task_9b.md             Task 9b, same template (no figure, by design).
+│   │   ├── task_9b.md             Task 9b, same template (no figure, by design).
+│   │   └── task_8a.md             Task 8a, same template (seven models, one frame list, the
+│   │                              anchor; no figure, no analysis, by design).
 │   ├── maintainers/
 │   │   ├── services.md            Protocols, Analyzer wiring, one sequence per request path,
 │   │   │                          module map, conventions that hold everywhere.
@@ -81,6 +83,19 @@ m1_llms_analyzer/
 │                                  continuation log-probs + paired nucleus samples per
 │                                  labelled cut, resumable, protocol + input sha256 in the
 │                                  header) -> the record and its three invariants -> Drive.
+│   └── experiment_8a.ipynb        Task 8a (recursion at scale, across models): same
+│                                  bootstrap, smoke test on the tiny model -> phase 0 (all
+│                                  seven tokenizers, the shared frames, once) -> one model
+│                                  per runtime -> the anchor check (hard stop on failure)
+│                                  -> one-frame walkthrough -> phase A scoring (resumable,
+│                                  one cache per model) -> phase B merge of every cache
+│                                  present into record_8a_multimodel.json -> Drive.
+│
+├── data/
+│   └── frames_8a_local30.json     Task 8a's anchor input: the local run's 30 frames (with
+│                                  their sentences) and Qwen2.5-0.5B's 210 rows of ret /
+│                                  ctrl / verb mass / n_tok / stop_tok. Read-only; its
+│                                  sha256 is stamped into anchor_8a.json and the record.
 │
 ├── src/m1_analyzer/
 │   ├── __init__.py                Public API surface: re-exports Analyzer, configs, records.
@@ -96,6 +111,8 @@ m1_llms_analyzer/
 │   │                              terminal or CI; reads inputs from flags, lines, JSON, JSONL.
 │   ├── testing.py                 Builds a tiny random GPT-2 + tokenizer on disk, offline.
 │   │                              Backs the test suite and `smoke_test.py --offline`.
+│   │                              `extra_vocab` adds words to the word-level vocabulary so
+│   │                              Task 8a's frames are one token per word on it.
 │   │                              Also owns TINY_LAYERS / TINY_HIDDEN /
 │   │                              TINY_MAX_POSITIONS, the shape tests assert against, so
 │   │                              no test needs to import `tests.conftest`; and
@@ -107,7 +124,7 @@ m1_llms_analyzer/
 │   │
 │   ├── config/
 │   │   ├── __init__.py            Re-exports the config dataclasses.
-│   │   └── settings.py            ModelConfig (incl. head: base | causal_lm) /
+│   │   └── settings.py            ModelConfig (incl. head: base | causal_lm, device_map) /
 │   │                              ExtractionConfig / ScoringConfig / StorageConfig / RunConfig.
 │   │                              Validation in __post_init__ so bad settings fail at
 │   │                              construction, not mid-forward-pass. RunConfig.fingerprint()
@@ -128,7 +145,9 @@ m1_llms_analyzer/
 │   │                              ResultSink Protocols. Services depend on these, never on each other.
 │   │   ├── model_service.py       Only module that calls transformers' loading APIs. Owns
 │   │                              the head choice (AutoModel vs AutoModelForCausalLM),
-│   │                              device/dtype choice, HF token use, pad-token fallback,
+│   │                              device/dtype choice (or an accelerate device_map, which
+│   │                              streams a 20-60 GB checkpoint straight to the GPU),
+│   │                              HF token use, pad-token fallback,
 │   │                              architecture rejection, layer-spec resolution, context
 │   │                              length, and provenance metadata. Raises ModelLoadError /
 │   │                              UnsupportedArchitectureError with actionable messages.
@@ -246,6 +265,27 @@ m1_llms_analyzer/
 │   │                              keys match the 9a record in order; within > 0),
 │   │                              build_record_9b, validate_record_9b. No analysis: the
 │   │                              pre-registered test is run from the record elsewhere.
+│   │   ├── frames_8a.py           Task 8a items: the request's frame generator VERBATIM
+│   │                              (pools, fourteen templates, PAIRS, the two token
+│   │                              assertions, seed 8) plus glue: CODES, VERB_POOL_8A (the
+│   │                              70-verb readout pool), FRAME_WORDS_8A, the
+│   │                              "prefix |suffix" sentence format, generate_frames_8a
+│   │                              (filter on every tokenizer given), token_table /
+│   │                              token_assertions (re-check the assertions from recorded
+│   │                              counts), verb_pool_kept, the frames file and its sha256.
+│   │   └── task_8a.py             Task 8a: MODELS_8A (the seven keys, HF ids, roles;
+│   │                              overridable), load_tokenizers (phase 0), the prefix ids
+│   │                              = tok(prefix) with the tokenizer's default special
+│   │                              tokens, frame_scalars (distances to REF, verb mass,
+│   │                              log P(V), top-10 per pass; vectors dropped),
+│   │                              score_frames_batch, score_model_8a (one fsynced JSONL
+│   │                              line per frame, resumable; a different model or frames
+│   │                              file refuses), rows_from_frame / model_block,
+│   │                              load_anchor_file / anchor_tokens_check / anchor_check /
+│   │                              anchor_diagnosis (reproduce the local Qwen2.5-0.5B rows
+│   │                              to 2 % before anything is read), build_record_8a,
+│   │                              validate_record_8a. No analysis: ratios and intervals
+│   │                              are computed from the record elsewhere.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -272,8 +312,9 @@ m1_llms_analyzer/
 │   │                              installing the package.
 │   └── make_doc_examples.py       Writes docs/assets/examples/ from the hand fixtures,
 │                                  FakeSpanScorer, synthetic 9a rows, mock_<task> data and
-│                                  (when torch imports) the tiny model; `--check` fails when
-│                                  the committed torch-free fragments have drifted.
+│                                  (when torch imports) the tiny model, including Task 8a's
+│                                  frames, cache and record; `--check` fails when the
+│                                  committed torch-free fragments have drifted.
 │
 └── tests/
     ├── conftest.py                Session-scoped tiny local model, Analyzer factory,
@@ -292,7 +333,7 @@ m1_llms_analyzer/
     │                              `tests.*`, which resolves only when the repo root is on
     │                              sys.path (true for `python -m pytest`, false for the
     │                              `pytest` console script).
-    ├── test_notebook.py           Guards both Colab notebooks: nbformat validity, every
+    ├── test_notebook.py           Guards every Colab notebook: nbformat validity, every
     │                              source line keeps its trailing newline, code cells compile
     │                              when joined the way a reader joins them, no hardcoded
     │                              secrets, header-based clone auth, no committed outputs.
@@ -337,6 +378,14 @@ m1_llms_analyzer/
     │                              generating, protocol and source-record guards, truncated
     │                              line, dry run, the 9a files byte-unchanged), the record
     │                              shape, the invariants, validation, EOS as an ordinary token.
+    ├── test_task_8a.py            The generator on fake tokenizers (seed-8 determinism, the
+    │                              pool filter, both assertions and uniqueness, max_draws,
+    │                              BOS counting), the scorer on the tiny model (shapes,
+    │                              ranges, a distance and verb mass recomputed by hand,
+    │                              resume, header guards, truncated line, dry run), the
+    │                              real anchor file's schema, the anchor pass / fail /
+    │                              diagnosis paths, the record and its validation, and
+    │                              device_map pass-through.
     └── test_architecture_doc.py   Fails if this file omits any source file.
 ```
 
@@ -484,6 +533,46 @@ The 9a cache and record are inputs only; nothing writes to them. The pre-registe
 (far vs close on `true_dlogp` and `sample_overlap` within 9a's length strata, Spearman with
 `state_div`) is deliberately not in this repository: it is run from the record.
 
+## How an experiment flows (Task 8a)
+
+```
+notebooks/experiment_8a.ipynb   -- one MODEL_KEY per runtime
+        │
+        ├──▶ PHASE 0 (tokenizers only, once)  experiments.task_8a.load_tokenizers(all seven keys)
+        │        experiments.frames_8a.generate_frames_8a(tokenizers, n=200, seed=8, max_draws=3000)
+        │          the request's generator verbatim: pool words single-token everywhere; per pair
+        │          n_tok(E) == n_tok(C) under each tokenizer's DEFAULT special tokens; last token equal
+        │          for the _B controls; unique (N1, V)
+        │     ──▶ outputs/task_8a/frames_8a_seed8.json   (reused by every runtime; sha256 in every header)
+        │
+        ▼
+container.Analyzer  ──▶ ModelService.load()  (AutoModelForCausalLM; device_map="auto" for 20B / 31B)
+        │           ──▶ NextTokenStateService (analyzer.states), ScoringConfig(bos_policy="none")
+        │
+        ├──▶ ANCHOR (qwen25_0.5b runtime)  experiments.task_8a.anchor_check(analyzer, spec, data/frames_8a_local30.json)
+        │        anchor_tokens_check: our n_tok / last_tok == the rows' n_tok / stop_tok, before any forward pass
+        │        score the 30 frames -> |ret - ours|/ours < 0.02, ctrl likewise, |verbmass - ours| < 0.01, every row
+        │     ──▶ anchor_8a.json; a failure raises SystemExit with anchor_diagnosis (BOS / dtype / trailing space)
+        │
+        ├──▶ PHASE A (GPU)  experiments.task_8a.score_model_8a(analyzer, spec, frames_path, cache_path)
+        │        header = model key, hf_id, revision, weight dtype, bos_added, vocab, frames sha256, measures; written FIRST
+        │        per batch of FRAMES_PER_BATCH frames: 14 prefixes each, ids = tok(prefix) (default special tokens),
+        │          state = float32 log_softmax at the last id;  frame_scalars:
+        │            dist_to_ref[code] = ||s_code - s_REF||,  verbmass[code] = sum exp(s[verb ids]),
+        │            logp_V[code] = s[id(" V")],  top10[code];  the vectors are then dropped
+        │     ──▶ outputs/task_8a/scores_8a_<key>.jsonl   (one line per frame, fsync, resume, Drive mirror)
+        │
+        └──▶ PHASE B (CPU, any runtime)  experiments.task_8a.build_record_8a(frames_path, {key: cache}, anchor=...)
+                 each cache: model_key and frames sha256 must match, every frame present (else skipped under allow_partial)
+                 model_block -> meta, verb_pool_kept, tokens (14 / frame), rows (7 / frame via rows_from_frame), top10
+                 validate_record_8a re-checks both token assertions and every count and range
+              ──▶ record_8a_multimodel.json  {meta, verb_pool, frames, models{key: ...}, anchor}
+```
+
+The anchor input is read-only. The pre-registered reading (every base model's depth-1 ratio
+intervals clear 1.0 with the token-matched control) is deliberately not in this repository: it
+is computed from the record.
+
 ## Layer indexing convention
 
 `output_hidden_states=True` returns `num_hidden_layers + 1` tensors:
@@ -510,5 +599,6 @@ for and the resolved absolute index, so a saved result is never ambiguous.
 | A new experiment task | New `experiments/task_<id>.py` producing the record its `fig_<id>` docstring specifies; reuse `treebank.py`, `spans.py`, `span_costs.py`, `stats.py`, `jsonl_cache.py`; a notebook copied from `experiment_1b.ipynb` or `experiment_9a.ipynb` |
 | A state-level experiment (distances between next-token vectors) | `NextTokenStateService.states(ids, positions)` via `analyzer.states`; see `experiments/splice.py` for the alignment bookkeeping |
 | A generation experiment (text after a context) | `experiments/decoding.py` (`sample_continuations`, `greedy_continuation`, `token_f1`) with `analyzer.models` as the provider; see `experiments/task_9b.py` for the per-cut driver, cache and record |
+| A multi-model experiment (the same items on several checkpoints) | `experiments/task_8a.py`: a `MODELS_8A`-style registry, tokenizer-only phase 0 that pins the items, one resumable cache per model, a CPU merge; `ModelConfig(device_map="auto")` for checkpoints larger than the CPU RAM |
 | Another treebank (UD) | `experiments/treebank.py` (`load_ud_conllu`: subtree yields -> spans, drop non-projective); name the conversion in the record's `treebank` field |
 | Another replacement policy | A class satisfying `ReplacementPolicy` in `experiments/proforms.py`; if its proforms are a subset of a cache's header, phase B alone suffices |

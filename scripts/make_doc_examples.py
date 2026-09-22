@@ -358,6 +358,53 @@ def tiny_model_examples(out: Path) -> None:
         analyzer.unload()
 
 
+def task_8a_tiny_examples(out: Path) -> None:
+    """Task 8a on a tiny model whose vocabulary spells every frame word: frames, cache, record."""
+    from m1_analyzer import Analyzer, ModelConfig, RunConfig, ScoringConfig
+    from m1_analyzer.experiments import (
+        FRAME_WORDS_8A, ModelSpec, build_record_8a, generate_frames_8a, load_scores_8a, save_frames_8a, score_model_8a,
+    )
+    from m1_analyzer.testing import build_tiny_local_model
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        model_path = build_tiny_local_model(tmp / "tiny_8a", extra_vocab=FRAME_WORDS_8A, max_positions=64)
+        analyzer = Analyzer(RunConfig(model=ModelConfig(model_id=model_path, head="causal_lm"),
+                                      scoring=ScoringConfig(bos_policy="none", batch_size=64)))
+        frames = generate_frames_8a({"tiny": analyzer.models.tokenizer}, n=3, seed=8)
+        frames_path = save_frames_8a(frames, tmp / "frames_8a_seed8.json")
+        shown = dict(frames)
+        shown["meta"] = {**frames["meta"], "tokenizers_filtered_on": ["tiny (illustrative; the real run filters on all seven)"]}
+        shown["verb_pool"] = frames["verb_pool"][:MAX_LIST] + ["..."]
+        write_json(out, "frames_8a_tiny.json", shown, trim=False)
+
+        cache = tmp / "scores_8a_tiny.jsonl"
+        spec = ModelSpec("tiny", model_path, role="illustrative")
+        score_model_8a(analyzer, spec, frames_path, cache_path=cache, show_progress=False)
+        header, rows = load_scores_8a(cache)
+        header = dict(header)
+        header["hf_id"] = "tiny random GPT-2 (illustrative)"
+        header["verb_pool"] = header["verb_pool"][:MAX_LIST] + ["..."]
+        header["verb_pool_kept"] = header["verb_pool_kept"][:MAX_LIST] + ["..."]
+        write_json(out, "scores_8a_tiny_header.json", header, trim=False)
+        row = dict(rows[0])
+        row["top10"] = {code: top[:3] + ["..."] for code, top in row["top10"].items()}
+        write_json(out, "scores_8a_tiny_row.json", row, trim=False)
+
+        record = build_record_8a(frames_path, {"tiny": cache})
+        block = dict(record["models"]["tiny"])
+        block["meta"] = {**block["meta"], "hf_id": "tiny random GPT-2 (illustrative)"}
+        block["verb_pool_kept"] = block["verb_pool_kept"][:MAX_LIST] + ["..."]
+        block["tokens"] = block["tokens"][:MAX_LIST] + ["..."]
+        block["rows"] = block["rows"][:2] + ["..."]
+        block["top10"] = {k: v[:3] + ["..."] for k, v in list(block["top10"].items())[:2]}
+        block["top10"]["..."] = "..."
+        record_shown = {**record, "verb_pool": record["verb_pool"][:MAX_LIST] + ["..."],
+                        "frames": record["frames"][:1] + ["..."], "models": {"tiny": block}}
+        write_json(out, "record_8a_tiny.json", record_shown, trim=False)
+        analyzer.unload()
+
+
 # ------------------------------------------------------------------- driver
 
 
@@ -369,6 +416,7 @@ def generate(out: Path, *, torch_ok: bool, figures: bool = True) -> None:
         mock_figures(out)
     if torch_ok:
         tiny_model_examples(out)
+        task_8a_tiny_examples(out)
 
 
 def torch_available() -> bool:

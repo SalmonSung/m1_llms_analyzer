@@ -84,6 +84,7 @@ nav:
       - Task 1b - bracket induction: tasks/task_1b.md
       - Task 9a - omittability by splicing: tasks/task_9a.md
       - Task 9b - does the deletion change the text: tasks/task_9b.md
+      - Task 8a - clause return across seven models: tasks/task_8a.md
   - Maintainers:
       - Architecture: architecture.md
       - Services and request flows: maintainers/services.md
