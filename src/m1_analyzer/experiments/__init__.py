@@ -13,10 +13,13 @@ every model's tokenizer; phase A: `score_model_8a` scores one model's fourteen
 passes per frame into a cache; phase B: `build_record_8a` merges the model
 caches and the `anchor_check` into the multi-model record. See
 notebooks/experiment_1b.ipynb, experiment_9a.ipynb, experiment_9b.ipynb and
-experiment_8a.ipynb.
+experiment_8a.ipynb. Tree recovery on the runner -- `tree_runner` runs jobs C
+(T1 endpoint distances) and A (T4 frame-only re-scoring) through the unmodified
+reference `tree_runner_ref`; `task_8a_js` is job B (8a with Jensen-Shannon and
+the head share). See notebooks/experiment_tree.ipynb.
 """
 
-from . import experiment_figures
+from . import experiment_figures, task_8a_js, tree_runner, tree_runner_ref
 from .boundaries import (
     BOUNDARY_KINDS, CLAUSE, SENTENCE, SPLITTERS, boundary_positions, sentence_char_spans, starts_sentence,
 )
@@ -121,6 +124,10 @@ from .task_8a import (
     score_model_8a,
     validate_record_8a,
 )
+from .task_8a_js import MODELS_8A_JS, build_record_8a_js, head_share, score_model_8a_js
+from .tree_runner import (
+    check_t1_anchor, check_t4_anchor, check_t4_cache, check_t4_causality, load_1b_cache, run_t1, run_t4,
+)
 from .proforms import (
     DEFAULT_PROFORMS, DELETION, ByLengthClass, MinOverSet, ReplacementPolicy, parse_policy, substitute,
 )
@@ -158,7 +165,10 @@ from .treebank import (
 )
 
 __all__ = [
-    "experiment_figures",
+    "experiment_figures", "task_8a_js", "tree_runner", "tree_runner_ref",
+    "MODELS_8A_JS", "build_record_8a_js", "head_share", "score_model_8a_js",
+    "check_t1_anchor", "check_t4_anchor", "check_t4_cache", "check_t4_causality", "load_1b_cache", "run_t1",
+    "run_t4",
     "BOUNDARY_KINDS", "CLAUSE", "SENTENCE", "SPLITTERS", "boundary_positions", "sentence_char_spans",
     "starts_sentence", "BOUNDARY_RULE", "boundary_check",
     "WIKIPEDIA_NAME", "Paragraph", "hand_paragraphs", "load_paragraph_file", "load_wikipedia_paragraphs",

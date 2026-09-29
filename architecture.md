@@ -53,8 +53,10 @@ m1_llms_analyzer/
 │   │   ├── task_1b.md             Task 1b, same template.
 │   │   ├── task_9a.md             Task 9a, same template (audit round trip included).
 │   │   ├── task_9b.md             Task 9b, same template (no figure, by design).
-│   │   └── task_8a.md             Task 8a, same template (seven models, one frame list, the
+│   │   ├── task_8a.md             Task 8a, same template (seven models, one frame list, the
 │   │                              anchor; no figure, no analysis, by design).
+│   │   └── tree_runner.md         Tree recovery on the runner: jobs C (T1), B (8a + JS) and
+│   │                              A (T4), the reference code, the 1b conventions, the checks.
 │   ├── maintainers/
 │   │   ├── services.md            Protocols, Analyzer wiring, one sequence per request path,
 │   │   │                          module map, conventions that hold everywhere.
@@ -90,12 +92,22 @@ m1_llms_analyzer/
 │                                  -> one-frame walkthrough -> phase A scoring (resumable,
 │                                  one cache per model) -> phase B merge of every cache
 │                                  present into record_8a_multimodel.json -> Drive.
+│   └── experiment_tree.ipynb      Tree recovery on the runner, one JOB per runtime: C (T1
+│                                  endpoint distances), B (8a + Jensen-Shannon, one model
+│                                  per runtime), A (T4 re-scoring). Smoke test -> inputs and
+│                                  float32 model -> the check on the first sentences (hard
+│                                  stop on failure) -> resumable full run -> deliverable
+│                                  with its meta block -> Drive.
 │
 ├── data/
 │   └── frames_8a_local30.json     Task 8a's anchor input: the local run's 30 frames (with
 │                                  their sentences) and Qwen2.5-0.5B's 210 rows of ret /
 │                                  ctrl / verb mass / n_tok / stop_tok. Read-only; its
 │                                  sha256 is stamped into anchor_8a.json and the record.
+│   └── anchor_tree_local.json     The tree runner's anchor (sent with the package): T1 L2 /
+│                                  JS for the 1b cache's first 20 sentences (3,505 spans)
+│                                  and t4_rows for two sentences, Qwen3-0.6B-Base float32
+│                                  on CPU. Read-only.
 │
 ├── src/m1_analyzer/
 │   ├── __init__.py                Public API surface: re-exports Analyzer, configs, records.
@@ -286,6 +298,22 @@ m1_llms_analyzer/
 │   │                              to 2 % before anything is read), build_record_8a,
 │   │                              validate_record_8a. No analysis: ratios and intervals
 │   │                              are computed from the record elsewhere.
+│   │   ├── task_8a_js.py          Runner job B: the 8a passes unchanged, per row ret / ctrl
+│   │                              (L2, the check against record_8a_multimodel.json, 2 %),
+│   │                              js_ret / js_ctrl (the reference's jsd_distance) and
+│   │                              head_ret / head_ctrl (head_share: the top-100 union's
+│   │                              share of the squared L2); score_model_8a_js (resumable
+│   │                              cache per model), l2_match, build_record_8a_js,
+│   │                              validate_record_8a_js.
+│   │   ├── tree_runner_ref.py     The runner package's reference code, VERBATIM (sha256
+│   │                              pinned by a test): the 1b text conventions, t4_rows,
+│   │                              t1_rows, jsd_distance, end_string. Never edited.
+│   │   └── tree_runner.py         Runner jobs C and A around the reference: load_1b_cache,
+│   │                              load_model_f32 (pinned revision, float32, <|endoftext|>
+│   │                              BOS), run_t1 / run_t4 (resumable working caches), the
+│   │                              checks (check_t1_anchor, check_t4_anchor,
+│   │                              check_t4_cache, check_t4_causality), run_meta and
+│   │                              finalize (meta line + one line per sentence, .gz for A).
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -378,6 +406,12 @@ m1_llms_analyzer/
     │                              generating, protocol and source-record guards, truncated
     │                              line, dry run, the 9a files byte-unchanged), the record
     │                              shape, the invariants, validation, EOS as an ordinary token.
+    ├── test_tree_runner.py        The reference's sha256, jsd_distance / head_share by
+    │                              hand, T1 and T4 on the tiny model (resume, header guard,
+    │                              batch invariance, causality), every check passing on its
+    │                              own numbers and failing when perturbed, the deliverable
+    │                              round trip, job B's L2 equal to the 8a scorer's, the
+    │                              2 % refusal, resume.
     ├── test_task_8a.py            The generator on fake tokenizers (seed-8 determinism, the
     │                              pool filter, both assertions and uniqueness, max_draws,
     │                              BOS counting), the scorer on the tiny model (shapes,

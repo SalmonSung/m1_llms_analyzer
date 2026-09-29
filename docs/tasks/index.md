@@ -16,6 +16,7 @@ glue, the package holds the logic.
 | [Task 9a](task_9a.md) | Do cuts between *close* endpoint states change what follows less than cuts between *far* ones? | `experiment_9a.ipynb` | `load_wikipedia_paragraphs` → `compute_splices` → `add_surprisal` → audit → `analyse_9a` → `fig_9a` | Streamed English Wikipedia paragraphs | `paragraphs_*.jsonl`, `splices_*.jsonl`, `audit_*.csv`, `record_9a_*.json`, `fig_9a_*.png` |
 | [Task 9b](task_9b.md) | Does the deletion change what the model *writes*, not only what it predicts? | `experiment_9b.ipynb` | `load_9a_inputs` → `compute_generation_9b` → `build_record_9b` | Task 9a's record and cache (read-only) | `gen_9b_*.jsonl`, `record_9b_*.json` (no figure) |
 | [Task 8a](task_8a.md) | Does the clause-return effect (Act 8) hold on seven models, on one shared 200-frame item set? | `experiment_8a.ipynb` | `load_tokenizers` → `generate_frames_8a` → `anchor_check` → `score_model_8a` → `build_record_8a` | Generated frames (seed 8, filtered on all seven tokenizers); the committed anchor file | `frames_8a_seed8.json`, `scores_8a_<key>.jsonl`, `anchor_8a.json`, `record_8a_multimodel.json` (no figure) |
+| [Tree recovery on the runner](tree_runner.md) | Jobs C (T1 endpoint distances), B (8a + Jensen–Shannon) and A (T4 frame-only re-scoring) for the tree-recovery runbook | `experiment_tree.ipynb` | `load_1b_cache` → `run_t1` / `run_t4` → `check_*` → `finalize`; `score_model_8a_js` → `build_record_8a_js` | The Task 1b cache, the 8a frames and record, the committed `data/anchor_tree_local.json` | `tree_t1_qwen3_0.6b.jsonl`, `record_8a_js.json`, `tree_t4_qwen3_0.6b.jsonl.gz` |
 
 ## How is the data collected?
 
@@ -26,10 +27,11 @@ glue, the package holds the logic.
 | Task 9a | English Wikipedia, `wikimedia/wikipedia` `20231101.en`, **streamed** through `datasets` (no bulk download) | `paragraphs.load_wikipedia_paragraphs(count_tokens, n, ...)`: clean → token-count and sentence-count filter → seeded sample from a pool | `paragraphs_<RUN_TAG>.jsonl` pins the draw; the notebook's *Pin the corpus* cell restores it by id on a later run |
 | Task 9b | Nothing new: Task 9a's `record_9a_*.json` (the labelled cuts) and `splices_*.jsonl` (texts and per-token surprisal) | `task_9b.load_9a_inputs(record, cache)`, sha256 of both stamped into the 9b cache header | The 9a files are never written to |
 | Task 8a | Generated, not downloaded: `frames_8a.generate_frames_8a(tokenizers, n=200, seed=8)` draws frames from word pools and keeps only those passing the token assertions in **all seven** tokenizers; plus the committed `data/frames_8a_local30.json` (the local run's 30 frames and Qwen2.5-0.5B rows) as the anchor | `task_8a.load_tokenizers` (phase 0) then the generator; `task_8a.load_anchor_file` | `frames_8a_seed8.json` pins the draw; its sha256 is in every model's cache header and checked on merge |
+| Tree runner | Nothing new: the Task 1b span-cost cache (`words`, `tree`, the span inventory), the 8a frames file and record, and the package's anchor | `tree_runner.load_1b_cache`, `task_8a.load_frames_8a`, `task_8a_js.load_record_8a` | Working caches `work_t1.jsonl` / `work_t4.jsonl` / `scores_8a_js_<key>.jsonl`, and the check numbers in `checks_*.json` |
 
 ## The shared notebook skeleton
 
-All five notebooks have the same shape, so once you have read one you can read the others:
+All six notebooks have the same shape, so once you have read one you can read the others:
 
 1. **Bootstrap**: clone or update the repo with a `GITHUB_TOKEN` Colab secret, scrub the token from `.git/config`.
 2. **Dependencies**: `pip install` with `--upgrade-strategy only-if-needed`, so Colab's CUDA-matched torch stays.

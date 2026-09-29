@@ -235,6 +235,25 @@ The prefix ids are `tok(prefix)` with the tokenizer's default special tokens (a 
 for Qwen), the state read at the last id, so the state service runs with `bos_policy="none"`; the 20B and
 31B checkpoints load with `ModelConfig(device_map="auto")`.
 
+`notebooks/experiment_tree.ipynb` runs the **tree-recovery runner jobs**, one `JOB` per runtime:
+**C** — T1, the L2 and Jensen–Shannon distance between the next-word states at every span's two ends of the
+1b sentences (Qwen3-0.6B-Base, float32) → `tree_t1_qwen3_0.6b.jsonl`; **B** — Task 8a again on the five models,
+adding `js_ret`, `js_ctrl`, `head_ret`, `head_ctrl` and repeating `ret`, `ctrl` (must match
+`record_8a_multimodel.json` within 2 %) → `record_8a_js.json`; **A** — T4, every substituted 1b sentence scored
+token by token with its own end mark → `tree_t4_qwen3_0.6b.jsonl.gz`. Jobs A and C import the package's
+reference code `experiments/tree_runner_ref.py` unmodified (sha256 pinned); each job runs its check on the first
+sentences and stops before the full run if it fails.
+
+```python
+from m1_analyzer.experiments import tree_runner
+_, sentences = tree_runner.load_1b_cache("span_costs_Qwen-Qwen3-0.6B-Base_....jsonl")
+tok, mdl, bos, device, _ = tree_runner.load_model_f32()                 # pinned revision, float32
+anchor = tree_runner.load_anchor("data/anchor_tree_local.json")
+rows = tree_runner.run_t1(tok, mdl, bos, sentences, device=device, cache_path="work_t1.jsonl",
+                          ids=[s["id"] for s in anchor["sentences"]])
+tree_runner.check_t1_anchor(rows, anchor)                               # Spearman >= 0.999, median rel <= 1 %
+```
+
 ---
 
 ## Configuration
@@ -339,7 +358,7 @@ The docs are a website: **[https://salmonsung.github.io/m1_llms_analyzer/](https
 
 | Page | What is in it |
 |---|---|
-| [Tasks](https://salmonsung.github.io/m1_llms_analyzer/tasks/) | Each pipeline (extraction, Task 1b, 9a, 9b, 8a): the `.py` files it uses, a diagram, how the data is collected, outputs, worked examples |
+| [Tasks](https://salmonsung.github.io/m1_llms_analyzer/tasks/) | Each pipeline (extraction, Task 1b, 9a, 9b, 8a, the tree runner): the `.py` files it uses, a diagram, how the data is collected, outputs, worked examples |
 | [Architecture](https://salmonsung.github.io/m1_llms_analyzer/architecture/) | Structure tree, every file's responsibility, request flows, extension points (the source is [`architecture.md`](https://github.com/SalmonSung/m1_llms_analyzer/blob/main/architecture.md)) |
 | [Services and request flows](https://salmonsung.github.io/m1_llms_analyzer/maintainers/services/) | The Protocols, the wiring, one sequence per request path, module map |
 | [Design decisions](https://salmonsung.github.io/m1_llms_analyzer/design_decisions/) | Every undiscussed choice and its reasoning, plus what is deliberately not built |
