@@ -86,6 +86,7 @@ nav:
       - Task 9b - does the deletion change the text: tasks/task_9b.md
       - Task 8a - clause return across seven models: tasks/task_8a.md
       - Tree recovery on the runner: tasks/tree_runner.md
+      - Job D (T4 on six models): tasks/job_d.md
   - Maintainers:
       - Architecture: architecture.md
       - Services and request flows: maintainers/services.md

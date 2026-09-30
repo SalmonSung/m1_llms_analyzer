@@ -503,6 +503,32 @@ table (`n_tok`, `last_tok` per pass) is in the record so both assertions can be 
 without the tokenizers; `validate_record_8a` does exactly that, plus every count and range.
 Full-precision floats are kept: the anchor tolerances are tight.
 
+## Job D
+
+### A faithful fast engine, not the reference's loop
+`ref.t4_rows` scores one sentence at a time, and its batches follow file order, so short and long substitutions pad
+to the same length. On one A100 the note's own estimates (156–309 GPU-hours) did not fit before 8 October. The
+engine keeps everything that defines a number: the jobs are built with the reference's own helpers, and the forward
+pass and the row formulas are the reference's. Only the batching changes: substitutions of several sentences are
+pooled, sorted by length and packed under a token budget. The reference file stays byte-identical
+(`reference_code_modified=false`), and `engine_equivalence` compares the engine with the unmodified
+`ref.t4_rows` before every item and stops on failure. A prefix KV cache was considered and **rejected**: it would make
+`pre_check` zero by construction, so the causality check could never fail.
+
+### Batch sizes are measured, not configured
+`calibrate_budget` probes the free memory after the weights at the longest possible sequence, then times a few
+budgets and keeps the fastest. `forward_safe` halves a batch that still runs out of memory. Batch shape changes only
+float rounding, so the chosen budget is recorded in the meta block and not in the resume header.
+
+### TF32 off
+Job A ran true float32. The float32 models of job D (Qwen3-0.6B, Qwen3-1.7B, GPT-2) keep that, so their numbers are
+comparable with job A's at the same precision. They are the cheap models, so this costs little time.
+
+### Causality is reported, not blocking
+The note reports `pre_check` (job A had 144 rows over 1e-3 from batch numerics, "that is fine") and flags bfloat16
+rows over 0.05 per prefix token. Both numbers go into `checks` and the meta block. The blocking checks are the
+engine, the anchor, the cache and completeness.
+
 ## Storage
 
 ### JSON is the index; the `.npz` sidecar holds the bulk
