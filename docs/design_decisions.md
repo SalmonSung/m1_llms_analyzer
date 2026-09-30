@@ -536,6 +536,20 @@ v4 adds `first_sub`, which needs the per-token log-probs that the working cache 
 therefore cannot be completed. The header's `reference_code_sha` refuses the resume, and the notebook renames the
 file `*.stale-<sha8>` (locally and on Drive) instead of deleting it.
 
+### Each original is scored alone, as the reference does
+`ref.t4_rows` scores the original sentence in a pass of its own (a batch of 1) and the substitutions in batches.
+In bfloat16 a one-row pass takes a different kernel path and rounds differently. The reference's `pre_check`
+(substitution prefix minus original) therefore carries about 0.05 nats of that noise, which is exactly what the
+note's causality check reports. Engine d1 packed the original with its substitutions, so its bf16 `pre_check` was
+exactly 0 and its `orig.lp` differed from the reference's by up to 0.13 nats. On Llama-3.1-8B, the d1
+`engine_equivalence` check failed on `pre_check` alone (median 0.052), while every score field had median
+difference 0. Engine d2 scores each original alone, costing one small pass per sentence. The bf16 equivalence gate
+now covers the score fields (`total`, `suf_sub`, `end_sub`, `first_sub`); `pre_check` and the original's
+log-probs are reported, because their pass-to-pass noise is what causality measures. float32 still gates every
+field within 0.01 nats. The float32 files written by d1 (Qwen3-0.6B main and held-out, Qwen3-1.7B main) differ
+from d2 by about 1e-4 nats. They passed job A's every-row comparison and are kept; their meta blocks predate
+`engine_version`.
+
 ### Causality is reported, not blocking
 The note reports `pre_check` (job A had 144 rows over 1e-3 from batch numerics, "that is fine") and flags bfloat16
 rows over 0.05 per prefix token. Both numbers go into `checks` and the meta block. The blocking checks are the

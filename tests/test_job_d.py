@@ -325,3 +325,39 @@ def test_a_cache_from_another_reference_is_refused_and_detectable(word_model, se
     with pytest.raises(ValueError, match="reference_code_sha"):
         job_d.run_item(tok, mdl, bos, sentences[:1], set_name="main", model_meta=meta, device="cpu",
                        budget=job_d.TokenBudget(2000), cache_path=cache, show_progress=False)
+
+
+def test_originals_are_scored_alone_like_the_reference(word_model, sentences):
+    """d2: each original is a batch of 1, so orig.lp equals ref.t4_rows's bit for bit on a float32 CPU model."""
+    tok, mdl, bos = word_model
+    fast = job_d.score_sentences(tok, mdl, bos, sentences, device="cpu", budget=job_d.TokenBudget(3000))
+    for f, r in zip(fast, _ref_rows(tok, mdl, bos, sentences)):
+        assert f["orig"] == r["orig"]
+
+
+def test_bf16_equivalence_gates_scores_and_reports_pre_check():
+    def row(total, pre):
+        return {"id": "s", "end": ".", "orig": {"ids": [1], "end_ids": [2], "lp": [-1.0], "end_lp": [-1.0]},
+                "rows": {"it": {f"0,{k}": [total + k, 3, 1, 1, -1.0, -1.0, pre, -1.0] for k in range(1, 6)}}}
+    ref_rows = [row(-10.0, 0.0)]
+    ok = job_d.check_equivalence([row(-10.0, 0.3)], ref_rows, dtype="bfloat16")
+    assert ok["pass"] and ok["abs_diff"]["pre_check"]["median"] == pytest.approx(0.3)
+    assert not job_d.check_equivalence([row(-10.2, 0.0)], ref_rows, dtype="bfloat16")["pass"]
+    assert not job_d.check_equivalence([row(-10.0, 0.3)], ref_rows, dtype="float32")["pass"]
+
+
+def test_a_cache_from_the_previous_engine_is_refused(word_model, sentences, tmp_path):
+    tok, mdl, bos = word_model
+    meta = {"model_id": "tiny", "revision": None, "dtype": "float32", "bos_id": bos, "bos_token": "[EOS]"}
+    cache = tmp_path / "w.jsonl"
+    d1 = {"kind": "header", "job": "t4-D", "set": "main", "model_id": "tiny", "revision": None, "dtype": "float32",
+          "bos_id": bos, "reference_code_sha": job_d.REFERENCE_SHA256, "sentences_sha256": job_d.SENTENCES_SHA256}
+    cache.write_text(json.dumps(d1) + "\n")
+    assert job_d.cache_is_current(cache) == (False, job_d.REFERENCE_SHA256[:8] + "-d1")
+    with pytest.raises(ValueError, match="engine"):
+        job_d.run_item(tok, mdl, bos, sentences[:1], set_name="main", model_meta=meta, device="cpu",
+                       budget=job_d.TokenBudget(2000), cache_path=cache, show_progress=False)
+    fresh = tmp_path / "fresh.jsonl"
+    job_d.run_item(tok, mdl, bos, sentences[:1], set_name="main", model_meta=meta, device="cpu",
+                   budget=job_d.TokenBudget(2000), cache_path=fresh, show_progress=False)
+    assert job_d.cache_is_current(fresh)[0]
