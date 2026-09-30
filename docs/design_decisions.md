@@ -524,6 +524,18 @@ float rounding, so the chosen budget is recorded in the meta block and not in th
 Job A ran true float32. The float32 models of job D (Qwen3-0.6B, Qwen3-1.7B, GPT-2) keep that, so their numbers are
 comparable with job A's at the same precision. They are the cheap models, so this costs little time.
 
+### The tokenizer checks run in parallel, once per tokenizer
+v4's `tokenizer_checks` takes about 20 minutes per set on one core. Its counts are per-text sums, so
+`tokenizer_checks_parallel` splits the sentences over forked processes and adds the parts: the result equals one
+serial call exactly (tested). Results are cached by the sha256 of the tokenizer's JSON and the set, so the three
+Qwen3 models, which share one tokenizer, pay once. The gates stop the run, as the note asks. A test tokenizer that
+fails them (the word-level tiny model does) is not worked around.
+
+### A cache from an older reference is retired, not resumed
+v4 adds `first_sub`, which needs the per-token log-probs that the working cache does not store. A v2 working cache
+therefore cannot be completed. The header's `reference_code_sha` refuses the resume, and the notebook renames the
+file `*.stale-<sha8>` (locally and on Drive) instead of deleting it.
+
 ### Causality is reported, not blocking
 The note reports `pre_check` (job A had 144 rows over 1e-3 from batch numerics, "that is fine") and flags bfloat16
 rows over 0.05 per prefix token. Both numbers go into `checks` and the meta block. The blocking checks are the

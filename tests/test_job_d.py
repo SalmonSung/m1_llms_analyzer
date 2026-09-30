@@ -1,4 +1,4 @@
-"""Job D offline: the v2 reference is unmodified, the fast engine reproduces ``ref.t4_rows`` on a
+"""Job D offline: the v4 reference is unmodified, the fast engine reproduces ``ref.t4_rows`` on a
 word-level and a byte-level BPE tokenizer, auto-sizing backs off on out-of-memory, the loop
 resumes, and the deliverable has the requested format."""
 
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from m1_analyzer.experiments import job_d, tree_runner
-from m1_analyzer.experiments import tree_runner_ref_v2 as ref
+from m1_analyzer.experiments import tree_runner_ref_v4 as ref
 from m1_analyzer.testing import build_tiny_local_model
 
 N_SENT = 5
@@ -73,7 +73,7 @@ def _ref_rows(tok, mdl, bos, sentences):
 # ------------------------------------------------------------------ package
 
 
-def test_reference_v2_is_the_packages():
+def test_reference_v4_is_the_packages():
     assert job_d.reference_sha256() == job_d.REFERENCE_SHA256
     assert job_d.reference_unmodified()
 
@@ -119,7 +119,10 @@ def test_anchor_file_blocks():
 
 def test_queue_covers_every_requested_item_once():
     wanted = {(m.slug, s) for m in job_d.MODELS_D.values() for s in m.sets}
-    assert len(job_d.QUEUE) == len(wanted) == 11
+    assert len(job_d.QUEUE) == len(wanted) == 12
+    assert [(m, s) for m, s, t in job_d.QUEUE if t == 1] == [
+        ("qwen3-0.6b", "main"), ("qwen3-0.6b", "heldout"), ("qwen3-1.7b", "main"), ("llama3.1-8b", "main"),
+        ("qwen3-8b", "main")]
     assert {(m, s) for m, s, _ in job_d.QUEUE} == wanted
     assert job_d.output_name("qwen3-8b", "main") == "tree_t4_qwen3-8b_main.jsonl.gz"
 
@@ -142,7 +145,8 @@ def test_engine_reproduces_reference_word_level(word_model, sentences, budget):
     fast = job_d.score_sentences(tok, mdl, bos, sentences, device="cpu", budget=job_d.TokenBudget(budget))
     check = job_d.check_equivalence(fast, _ref_rows(tok, mdl, bos, sentences), dtype="float32")
     assert check["pass"], check
-    assert check["abs_diff"]["total"]["max"] < 1e-4
+    assert check["abs_diff"]["total"]["max"] < 1e-4 and check["abs_diff"]["first_sub"]["max"] < 1e-4
+    assert all(len(v) == 8 for r in fast for t in r["rows"].values() for v in t.values())
 
 
 def test_engine_reproduces_reference_bpe(bpe_model, sentences):
@@ -155,6 +159,36 @@ def test_engine_reproduces_reference_bpe(bpe_model, sentences):
     # the byte-level tokenizer makes multi-token words: the frame counts are not trivial
     assert any(v[2] != v[3] for r in refr for t in r["rows"].values() for v in t.values())
     assert job_d.check_complete(fast, sentences)["pass"]
+
+
+def test_first_sub_is_the_first_frame_token(bpe_model, sentences):
+    """The note: first_sub equals suf_sub when one suffix token follows, end_sub when none does and the end
+    mark is one token."""
+    tok, mdl, bos = bpe_model
+    rows = job_d.score_sentences(tok, mdl, bos, sentences, device="cpu", budget=job_d.TokenBudget(1500))
+    one_suf = no_suf = 0
+    for r in rows:
+        single_end = len(r["orig"]["end_ids"]) == 1
+        for table in r["rows"].values():
+            for v in table.values():
+                if v[3] == 1:
+                    assert v[7] == v[4]
+                    one_suf += 1
+                elif v[3] == 0 and single_end:
+                    assert v[7] == v[5]
+                    no_suf += 1
+    assert one_suf and no_suf
+
+
+def test_tokenizer_checks_parallel_equals_serial(bpe_model, sentences):
+    tok = bpe_model[0]
+    serial = ref.tokenizer_checks(tok, sentences)
+    assert job_d.tokenizer_checks_parallel(tok, sentences, workers=2, chunk=2) == serial
+    gate = job_d.tokenizer_gate(serial, tok_sha=job_d.tokenizer_sha(tok))
+    assert gate["pass"] and gate["is_fast"] and gate["n_substitutions"] == 17 * sum(len(s["keys"]) for s in sentences)
+    assert not job_d.tokenizer_gate({**serial, "roundtrip_fail": 1})["pass"]
+    assert job_d.tokenizer_gate({**serial, "is_fast": False})["failed"] == ["is_fast"]
+    assert job_d.tokenizer_gate({**serial, "end_merge": 5})["pass"]         # reported, not a gate
 
 
 def test_oom_halves_the_batch_and_shrinks_the_budget(word_model, sentences):
@@ -219,9 +253,11 @@ def test_run_resumes_and_finalizes(word_model, sentences, tmp_path):
         job_d.finalize_item(rows[:-1], sentences, tmp_path / "x.jsonl.gz", m)
     out = job_d.finalize_item(list(reversed(rows)), sentences, tmp_path / job_d.output_name("gpt2", "main"), m)
     head, body = job_d.read_deliverable(out)
-    for key in ("set", "sentences_sha256", "bos_token", "reference_code_sha", "reference_code_modified", "revision",
-                "checks", "wall_seconds", "gpu", "torch", "transformers"):
-        assert key in head
+    for key in ("job", "date", "model_id", "revision", "dtype", "logits_dtype", "versions", "gpu", "wall_seconds",
+                "reference_code_sha", "reference_code_modified", "checks", "n_sentences", "n_spans", "fillers", "bos_id",
+                "batch", "notebook", "set", "sentences_sha256", "bos_token"):
+        assert key in head, key
+    assert head["job"] == "d"
     assert head["reference_code_modified"] is False and head["reference_code_sha"] == job_d.REFERENCE_SHA256
     assert [r["id"] for r in body] == [s["id"] for s in sentences]
     assert set(body[0]) == {"id", "end", "orig", "rows"}
@@ -253,3 +289,39 @@ def test_span_totals_reader(tmp_path):
                  + json.dumps({"id": "a", "words": ["x", "y"], "spans": {"it": {"0,1": [-1.0, 2]}}}) + "\n")
     header, rows = job_d.load_span_totals(p)
     assert header["proforms"] == ["it"] and rows["a"]["spans"]["it"]["0,1"] == [-1.0, 2]
+
+
+def test_job_a_check(word_model, sentences, tmp_path):
+    tok, mdl, bos = word_model
+    rows = job_d.score_sentences(tok, mdl, bos, sentences[:3], device="cpu", budget=job_d.TokenBudget(3000))
+    job_a = [{"id": r["id"], "end": r["end"], "orig": r["orig"],
+              "rows": {f: {k: v[:7] for k, v in t.items()} for f, t in r["rows"].items()}} for r in rows]
+    path = tmp_path / "a.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        fh.write(json.dumps({"meta": {}}) + "\n")
+        for r in job_a:
+            fh.write(json.dumps(r) + "\n")
+    ok = job_d.check_job_a(rows, path)
+    assert ok["pass"] and ok["n_sentences"] == 3 and ok["max_abs_diff"]["total"] == 0.0
+    assert job_d.check_job_a(rows, path, ids=[rows[0]["id"]])["n_sentences"] == 1
+    bumped = json.loads(json.dumps(rows))
+    f = next(iter(bumped[0]["rows"]))
+    k = next(iter(bumped[0]["rows"][f]))
+    bumped[0]["rows"][f][k][0] += 0.02
+    assert not job_d.check_job_a(bumped, path)["pass"]
+    bumped[0]["rows"][f][k][0] -= 0.02
+    bumped[0]["rows"][f][k][2] += 1
+    assert job_d.check_job_a(bumped, path)["int_mismatches"] == 1
+
+
+def test_a_cache_from_another_reference_is_refused_and_detectable(word_model, sentences, tmp_path):
+    tok, mdl, bos = word_model
+    meta = {"model_id": "tiny", "revision": None, "dtype": "float32", "bos_id": bos, "bos_token": "[EOS]"}
+    cache = tmp_path / "w.jsonl"
+    old = {"kind": "header", "job": "t4-D", "set": "main", "model_id": "tiny", "revision": None, "dtype": "float32",
+           "bos_id": bos, "reference_code_sha": "1a4fe95f" + "0" * 56, "sentences_sha256": job_d.SENTENCES_SHA256}
+    cache.write_text(json.dumps(old) + "\n")
+    assert job_d.cache_reference_sha(cache) != job_d.REFERENCE_SHA256
+    with pytest.raises(ValueError, match="reference_code_sha"):
+        job_d.run_item(tok, mdl, bos, sentences[:1], set_name="main", model_meta=meta, device="cpu",
+                       budget=job_d.TokenBudget(2000), cache_path=cache, show_progress=False)

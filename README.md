@@ -254,10 +254,11 @@ rows = tree_runner.run_t1(tok, mdl, bos, sentences, device=device, cache_path="w
 tree_runner.check_t1_anchor(rows, anchor)                               # Spearman >= 0.999, median rel <= 1 %
 ```
 
-`notebooks/experiment_job_d.ipynb` runs **job D**: job A's T4 pass on Qwen3-0.6B (held-out), Qwen3-1.7B,
+`notebooks/experiment_job_d.ipynb` runs **job D**: job A's T4 pass on Qwen3-0.6B, Qwen3-1.7B,
 Qwen3-8B, Llama-3.1-8B, OLMo-3-7B and GPT-2, on the 1,000 main and 2,161 held-out sentences of
 `data/job_d/sentences_3161.jsonl`. It runs as one resumable queue on a single A100-40GB, in the note's delivery
-order. The reference v2 (`experiments/tree_runner_ref_v2.py`) is unmodified. The engine
+order, after the note's tokenizer checks for every model. The reference v4 (`experiments/tree_runner_ref_v4.py`,
+8 numbers per row, the last being `first_sub`) is unmodified. The engine
 (`job_d.score_sentences`) builds the same jobs but packs substitutions of several sentences by length under an
 auto-sized token budget, and is checked against `ref.t4_rows` before every item. Each item writes
 `tree_t4_<model>_<set>.jsonl.gz` and `checks_<model>_<set>.json` to Drive as soon as it is done.
