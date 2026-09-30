@@ -55,8 +55,10 @@ m1_llms_analyzer/
 │   │   ├── task_9b.md             Task 9b, same template (no figure, by design).
 │   │   ├── task_8a.md             Task 8a, same template (seven models, one frame list, the
 │   │                              anchor; no figure, no analysis, by design).
-│   │   └── tree_runner.md         Tree recovery on the runner: jobs C (T1), B (8a + JS) and
-│   │                              A (T4), the reference code, the 1b conventions, the checks.
+│   │   ├── tree_runner.md         Tree recovery on the runner: jobs C (T1), B (8a + JS) and
+│   │   │                          A (T4), the reference code, the 1b conventions, the checks.
+│   │   └── job_d.md               Job D: T4 on six models x {main, held-out} on one A100,
+│   │                              the fast engine, auto-sizing, the checks, the queue.
 │   ├── maintainers/
 │   │   ├── services.md            Protocols, Analyzer wiring, one sequence per request path,
 │   │   │                          module map, conventions that hold everywhere.
@@ -92,22 +94,31 @@ m1_llms_analyzer/
 │                                  -> one-frame walkthrough -> phase A scoring (resumable,
 │                                  one cache per model) -> phase B merge of every cache
 │                                  present into record_8a_multimodel.json -> Drive.
-│   └── experiment_tree.ipynb      Tree recovery on the runner, one JOB per runtime: C (T1
-│                                  endpoint distances), B (8a + Jensen-Shannon, one model
-│                                  per runtime), A (T4 re-scoring). Smoke test -> inputs and
-│                                  float32 model -> the check on the first sentences (hard
-│                                  stop on failure) -> resumable full run -> deliverable
-│                                  with its meta block -> Drive.
+│   ├── experiment_tree.ipynb      Tree recovery on the runner, one JOB per runtime: C (T1
+│   │                              endpoint distances), B (8a + Jensen-Shannon, one model
+│   │                              per runtime), A (T4 re-scoring). Smoke test -> inputs and
+│   │                              float32 model -> the check on the first sentences (hard
+│   │                              stop on failure) -> resumable full run -> deliverable
+│   │                              with its meta block -> Drive.
+│   └── experiment_job_d.ipynb     Job D: one queue of 11 model x set items in delivery
+│                                  order. Smoke test -> status -> per item: model at the
+│                                  full revision, auto-sizing, the checks (hard stop on a
+│                                  blocking failure), resumable run, deliverable + checks
+│                                  pushed to Drive at once.
 │
 ├── data/
 │   └── frames_8a_local30.json     Task 8a's anchor input: the local run's 30 frames (with
 │                                  their sentences) and Qwen2.5-0.5B's 210 rows of ret /
 │                                  ctrl / verb mass / n_tok / stop_tok. Read-only; its
 │                                  sha256 is stamped into anchor_8a.json and the record.
-│   └── anchor_tree_local.json     The tree runner's anchor (sent with the package): T1 L2 /
-│                                  JS for the 1b cache's first 20 sentences (3,505 spans)
-│                                  and t4_rows for two sentences, Qwen3-0.6B-Base float32
-│                                  on CPU. Read-only.
+│   ├── anchor_tree_local.json     The tree runner's anchor (sent with the package): T1 L2 /
+│   │                              JS for the 1b cache's first 20 sentences (3,505 spans)
+│   │                              and t4_rows for two sentences, Qwen3-0.6B-Base float32
+│   │                              on CPU. Read-only.
+│   └── job_d/                     Job D's package, verbatim and read-only:
+│                                  sentences_3161.jsonl (1,000 main + 2,161 held-out, sha256
+│                                  pinned), anchor_job_d.json (Qwen3-0.6B and GPT-2 rows,
+│                                  BOS ids, revisions), runner_note_job_d.md (the request).
 │
 ├── src/m1_analyzer/
 │   ├── __init__.py                Public API surface: re-exports Analyzer, configs, records.
@@ -308,12 +319,24 @@ m1_llms_analyzer/
 │   │   ├── tree_runner_ref.py     The runner package's reference code, VERBATIM (sha256
 │   │                              pinned by a test): the 1b text conventions, t4_rows,
 │   │                              t1_rows, jsd_distance, end_string. Never edited.
-│   │   └── tree_runner.py         Runner jobs C and A around the reference: load_1b_cache,
-│   │                              load_model_f32 (pinned revision, float32, <|endoftext|>
-│   │                              BOS), run_t1 / run_t4 (resumable working caches), the
-│   │                              checks (check_t1_anchor, check_t4_anchor,
-│   │                              check_t4_cache, check_t4_causality), run_meta and
-│   │                              finalize (meta line + one line per sentence, .gz for A).
+│   │   ├── tree_runner.py         Runner jobs C and A around the reference: load_1b_cache,
+│   │   │                          load_model_f32 (pinned revision, float32, <|endoftext|>
+│   │   │                          BOS), run_t1 / run_t4 (resumable working caches), the
+│   │   │                          checks (check_t1_anchor, check_t4_anchor,
+│   │   │                          check_t4_cache [optionally on a filler subset],
+│   │   │                          check_t4_causality), run_meta and finalize (meta line +
+│   │   │                          one line per sentence, .gz for A).
+│   │   ├── tree_runner_ref_v2.py  Job D's reference code v2, VERBATIM (sha256 pinned):
+│   │   │                          v1 plus bos_id() and span_keys(). Never edited.
+│   │   └── job_d.py               Job D: MODELS_D / QUEUE, load_sentences (sha-checked),
+│   │                              resolve_revision (full sha from the note's prefix),
+│   │                              load_model_d (dtype, BOS checked, TF32 off), the engine
+│   │                              (prepare = ref.t4_rows's jobs; score_sentences = length-
+│   │                              sorted, budget-packed passes across sentences),
+│   │                              calibrate_budget / forward_safe (auto-sizing, OOM
+│   │                              backoff), run_item (resumable, timed Drive mirror), the
+│   │                              checks (equivalence vs ref.t4_rows, anchor, cache,
+│   │                              causality, complete), item_meta, finalize_item.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -406,6 +429,10 @@ m1_llms_analyzer/
     │                              generating, protocol and source-record guards, truncated
     │                              line, dry run, the 9a files byte-unchanged), the record
     │                              shape, the invariants, validation, EOS as an ordinary token.
+    ├── test_job_d.py              v2 and sentence sha256s, the queue, revision resolution,
+    │                              the engine equal to ref.t4_rows on a word-level and a
+    │                              byte-level BPE tokenizer, OOM backoff, packing, resume,
+    │                              the cache check on a filler subset, the deliverable.
     ├── test_tree_runner.py        The reference's sha256, jsd_distance / head_share by
     │                              hand, T1 and T4 on the tiny model (resume, header guard,
     │                              batch invariance, causality), every check passing on its

@@ -359,11 +359,16 @@ def check_t4_anchor(rows: Sequence[Mapping[str, Any]], anchor_t4: Sequence[Mappi
 
 
 def check_t4_cache(rows: Sequence[Mapping[str, Any]], cache_sentences: Sequence[Mapping[str, Any]],
-                   *, min_spearman: float = T4_CACHE_MIN_SPEARMAN) -> dict[str, Any]:
-    """Check 2: ``n_tok`` equals the 1b cache's count on every row; ``total`` rank-correlates with its total."""
+                   *, min_spearman: float = T4_CACHE_MIN_SPEARMAN,
+                   fillers: Sequence[str] | None = None) -> dict[str, Any]:
+    """Check 2: ``n_tok`` equals the 1b cache's count on every row; ``total`` rank-correlates with its total.
+
+    `fillers` restricts the check to those strings (a 1b cache that scored only some of them)."""
     cache = {s["id"]: s["spans"] for s in cache_sentences}
     ours, theirs, mismatches, missing = [], [], [], 0
     for sid, filler, key, v in _iter_t4(rows):
+        if fillers is not None and filler not in fillers:
+            continue
         c = cache.get(sid, {}).get(filler, {}).get(key)
         if c is None:
             missing += 1
