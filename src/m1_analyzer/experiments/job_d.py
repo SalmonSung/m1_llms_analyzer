@@ -3,7 +3,8 @@
 Job A (`tree_runner`) scored every span of the 1,000 main sentences, replaced by each
 of 17 strings, on Qwen3-0.6B-Base. Job D repeats that computation for five more models and
 a held-out set of 2,161 sentences (`data/job_d/sentences_3161.jsonl`). The package's
-reference code v2 (`tree_runner_ref_v2`) is kept byte-identical and defines the numbers.
+reference code v4 (`tree_runner_ref_v4`) is kept byte-identical and defines the numbers; each row is
+``[total, n_tok, n_pre, n_suf, suf_sub, end_sub, pre_check, first_sub]``.
 
 **The engine.** `ref.t4_rows` scores one sentence at a time. Its batches follow file
 order, so short and long substitutions are padded to the same length. That is too slow for
@@ -21,10 +22,13 @@ every run.
 memory left after the weights, and the fastest one. `forward_safe` halves a batch that
 still runs out of memory and shrinks the budget for later batches.
 
+**Tokenizer checks.** ``ref.tokenizer_checks`` (the note's gates) runs per tokenizer and set,
+split over CPU processes by `tokenizer_checks_parallel` (the counts add up to the serial call's).
+
 **The run.** `run_item` keeps a resumable working cache per model and set (one fsynced
 line per sentence, header checked on resume) and mirrors it to Drive on a timer.
 `finalize_item` writes ``tree_t4_<model>_<set>.jsonl.gz`` in job A's row format, with
-job A's meta fields plus ``set``, ``sentences_sha256`` and ``bos_token``.
+the note's meta fields (``job = "d"``, plus ``set``, ``sentences_sha256`` and ``bos_token``).
 """
 
 from __future__ import annotations
@@ -44,13 +48,13 @@ import numpy as np
 
 from ..utils.logging import get_logger
 from . import tree_runner
-from . import tree_runner_ref_v2 as ref
+from . import tree_runner_ref_v4 as ref
 from .jsonl_cache import append_row, check_header, mirror, read_jsonl, rewrite, write_header
 
 log = get_logger("job_d")
 
 #: sha256 of the package files (runner note, "Inputs").
-REFERENCE_SHA256 = "1a4fe95fdbfc4054a91de6c2b15bd346ae83b5df52f481017ace904907fe2d4b"
+REFERENCE_SHA256 = "3b1e5aac659e22f7afdbe0755134e04bd416e27888ab2b7f205039d8e2f5394b"
 SENTENCES_SHA256 = "f2a25c1c18a967b1767eae1473d298d52d6bec3865a4e7e30007ef0370716e55"
 REFERENCE_PATH = Path(ref.__file__)
 
@@ -70,7 +74,14 @@ CAUSALITY_BF16_PER_TOKEN = 0.05    # the note's bf16 flag, per prefix token
 EQUIV_TOL_F32 = 1e-2               # fast engine vs ref.t4_rows, float32: max |diff| in nats
 EQUIV_TOL_BF16_MEDIAN = 0.05       # bfloat16: median |diff| ...
 EQUIV_MIN_SPEARMAN_BF16 = 0.9999   # ... and rank agreement of `total`
-FLOAT_FIELDS = {"total": 0, "suf_sub": 4, "end_sub": 5, "pre_check": 6}
+FLOAT_FIELDS = {"total": 0, "suf_sub": 4, "end_sub": 5, "pre_check": 6, "first_sub": 7}
+#: Anchor fields (the note: 0.05 nats on these four).
+ANCHOR_FIELDS = (("total", 0), ("suf_sub", 4), ("end_sub", 5), ("first_sub", 7))
+N_FIELDS = 8
+JOB_A_TOL_NATS = 0.01              # fields 1-7 against job A (Qwen3-0.6B main)
+#: tokenizer_checks gates (must hold) and reported counts.
+TOKENIZER_GATES = ("special_in_text", "roundtrip_fail", "offsets_bad")
+TOKENIZER_REPORTED = ("frame_pre_short", "frame_suf_short", "end_merge")
 
 #: log_softmax runs on row chunks whose float32 copy stays under this many bytes.
 LOGSOFTMAX_CHUNK_BYTES = 1 << 30
@@ -93,11 +104,13 @@ class ModelD:
     extra_cache_file: str | None = None  # a 1b cache for a reported, non-blocking check
     bos_anchor_key: str | None = None    # its entry in the anchor's "bos" block
     bos_token: str | None = None         # the start token the note names
+    job_a_file: str | None = None        # job A's deliverable: fields 1-7 must match it (Qwen3-0.6B main)
 
 
 MODELS_D: dict[str, ModelD] = {m.slug: m for m in (
     ModelD("qwen3-0.6b", "Qwen/Qwen3-0.6B-Base", "da87bfb608c14b7cf20ba1ce41287e8de496c0cd", "float32",
-           ("heldout",), anchor=True, bos_anchor_key="qwen3_06b_base", bos_token="<|endoftext|>"),
+           ("main", "heldout"), anchor=True, bos_anchor_key="qwen3_06b_base", bos_token="<|endoftext|>",
+           job_a_file="tree_t4_qwen3_0.6b.jsonl.gz"),
     ModelD("qwen3-1.7b", "Qwen/Qwen3-1.7B-Base", "ea980cb0a6c2", "float32", ("main", "heldout"),
            cache_file="span_costs_Qwen-Qwen3-1.7B-Base_min-over-it-there-did-then.jsonl",
            bos_anchor_key="tok_qwen3_17b", bos_token="<|endoftext|>"),
@@ -115,7 +128,8 @@ MODELS_D: dict[str, ModelD] = {m.slug: m for m in (
 
 #: The note's delivery order (tier 1, 2, 3), smallest model first within a tier.
 QUEUE: tuple[tuple[str, str, int], ...] = (
-    ("qwen3-1.7b", "main", 1), ("qwen3-0.6b", "heldout", 1), ("llama3.1-8b", "main", 1), ("qwen3-8b", "main", 1),
+    ("qwen3-0.6b", "main", 1), ("qwen3-0.6b", "heldout", 1), ("qwen3-1.7b", "main", 1), ("llama3.1-8b", "main", 1),
+    ("qwen3-8b", "main", 1),
     ("gpt2", "main", 2), ("gpt2", "heldout", 2), ("qwen3-1.7b", "heldout", 2), ("olmo3-7b", "main", 2),
     ("qwen3-8b", "heldout", 3), ("llama3.1-8b", "heldout", 3), ("olmo3-7b", "heldout", 3),
 )
@@ -132,6 +146,10 @@ def checks_name(slug: str, set_name: str) -> str:
 
 def work_name(slug: str, set_name: str) -> str:
     return f"work_t4_{slug}_{set_name}.jsonl"
+
+
+def tokenizer_check_name(tok_sha: str, set_name: str) -> str:
+    return f"tokenizer_{tok_sha[:12]}_{set_name}.json"
 
 
 # ----------------------------------------------------------------- reference
@@ -179,8 +197,8 @@ def load_sentences(path: str | os.PathLike = SENTENCES_FILE, set_name: str | Non
             end = ref.end_string(row["tree"])
             if row["end"] != end:
                 raise ValueError(f"{row['id']}: end {row['end']!r} != end_string(tree) {end!r}")
-            out.append({"id": row["id"], "set": row["set"], "words": list(row["words"]), "tree": row["tree"],
-                        "end": row["end"], "keys": ref.span_keys(len(row["words"]))})
+            out.append({"id": row["id"], "set": row["set"], "words": list(row["words"]), "text": row["text"],
+                        "tree": row["tree"], "end": row["end"], "keys": ref.span_keys(len(row["words"]))})
     return out
 
 
@@ -276,6 +294,21 @@ def load_model_d(spec: ModelD, *, revision: str | None = None, anchor: Mapping[s
     meta = {"model_id": spec.hf_id, "revision": full, "dtype": spec.dtype, "bos_id": int(bos), "bos_token": bos_token,
             **numerics}
     return tok, mdl, int(bos), str(analyzer.models.device), analyzer, meta
+
+
+def load_tokenizer_d(spec: ModelD, *, revision: str | None = None, hf_token: str | None = None,
+                     cache_dir: str | None = None) -> tuple[Any, str]:
+    """``(tokenizer, full_revision)`` without the model, for the tokenizer checks."""
+    from transformers import AutoTokenizer
+
+    from ..utils.env import resolve_hf_token
+
+    token = resolve_hf_token(hf_token)
+    full = revision or resolve_revision(spec.hf_id, spec.revision, token=token)
+    kwargs = {"revision": full, "cache_dir": cache_dir}
+    if token:
+        kwargs["token"] = token
+    return AutoTokenizer.from_pretrained(spec.hf_id, **kwargs), full
 
 
 def _cuda() -> bool:
@@ -458,7 +491,8 @@ def score_sentences(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[st
             lpe = lps[p["first"] + k]
             lp = lpe[:len(ids)]
             rows[f][key] = [float(lp.sum()), len(ids), n_pre, n_suf, float(lp[len(ids) - n_suf:].sum()) if n_suf else 0.0,
-                            float(lpe[len(ids):].sum()), float((lp[:n_pre] - lp0[:n_pre]).sum())]
+                            float(lpe[len(ids):].sum()), float((lp[:n_pre] - lp0[:n_pre]).sum()),
+                            float(lpe[len(ids) - n_suf])]
         out.append({"id": s["id"], "end": s["end"], "orig": orig, "rows": rows,
                     "n_seq": 1 + len(p["jobs"])})
     return out
@@ -708,8 +742,9 @@ def check_equivalence(fast_rows: Sequence[Mapping[str, Any]], ref_rows: Sequence
 
 
 def check_anchor(rows: Sequence[Mapping[str, Any]], anchor: Mapping[str, Any], hf_id: str) -> dict[str, Any]:
-    """The note's anchor check (0.05 nats on total / suf_sub / end_sub; counts identical)."""
-    return tree_runner.check_t4_anchor(rows, anchor["models"][hf_id]["sentences"], tol=ANCHOR_TOL_NATS)
+    """The note's anchor check (0.05 nats on total / suf_sub / end_sub / first_sub; counts identical)."""
+    return tree_runner.check_t4_anchor(rows, anchor["models"][hf_id]["sentences"], tol=ANCHOR_TOL_NATS,
+                                       fields=ANCHOR_FIELDS)
 
 
 def check_cache(rows: Sequence[Mapping[str, Any]], cache: Mapping[str, Mapping[str, Any]],
@@ -760,11 +795,118 @@ def check_complete(rows: Sequence[Mapping[str, Any]], sentences: Sequence[Mappin
                     missing_rows += 1
                     continue
                 n += 1
-                if not all(math.isfinite(float(x)) for x in v) or v[1] <= 0:
+                if len(v) != N_FIELDS or not all(math.isfinite(float(x)) for x in v) or v[1] <= 0:
                     bad.append(f"{s['id']} {f} {key}: {v}")
     ok = not missing_sent and not missing_rows and not bad
     return {"n_sentences": len(sentences), "n_rows": n, "missing_sentences": len(missing_sent),
             "missing_rows": missing_rows, "non_finite_or_empty": len(bad), "examples": bad[:5], "pass": bool(ok)}
+
+
+def check_job_a(rows: Sequence[Mapping[str, Any]], job_a_path: str | os.PathLike, *,
+                ids: Iterable[str] | None = None, tol: float = JOB_A_TOL_NATS) -> dict[str, Any]:
+    """Fields 1-7 against job A's deliverable, every row of the given sentences (default: all of `rows`).
+
+    Streams job A's ``.jsonl.gz`` line by line. Integer fields must be identical, the original ids and end
+    mark too; the float fields (total, suf_sub, end_sub, pre_check) within `tol` nats.
+    """
+    mine = {r["id"]: r for r in rows}
+    wanted = set(mine) if ids is None else set(ids) & set(mine)
+    names = {"total": 0, "suf_sub": 4, "end_sub": 5, "pre_check": 6}
+    worst = {k: 0.0 for k in names}
+    int_mismatch, problems, n, seen = [], [], 0, set()
+    with gzip.open(job_a_path, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            a = json.loads(line)
+            if "meta" in a or a.get("id") not in wanted:
+                continue
+            seen.add(a["id"])
+            m = mine[a["id"]]
+            if m["end"] != a["end"] or m["orig"]["ids"] != a["orig"]["ids"] or m["orig"]["end_ids"] != a["orig"]["end_ids"]:
+                problems.append(f"{a['id']}: end mark or original ids differ")
+            if set(m["rows"]) != set(a["rows"]):
+                problems.append(f"{a['id']}: fillers differ")
+            for f, table in a["rows"].items():
+                ours = m["rows"].get(f, {})
+                if set(ours) != set(table):
+                    problems.append(f"{a['id']} {f}: span keys differ")
+                for key, v in table.items():
+                    w = ours.get(key)
+                    if w is None:
+                        continue
+                    n += 1
+                    if list(w[1:4]) != list(v[1:4]):
+                        int_mismatch.append(f"{a['id']} {f} {key}: {w[1:4]} != {v[1:4]}")
+                    for name, k in names.items():
+                        worst[name] = max(worst[name], abs(float(w[k]) - float(v[k])))
+    missing = sorted(wanted - seen)
+    ok = not missing and not int_mismatch and not problems and all(x <= tol for x in worst.values())
+    return {"job_a_file": Path(job_a_path).name, "n_sentences": len(seen), "n_rows": n,
+            "sentences_missing_from_job_a": len(missing), "missing_examples": missing[:5],
+            "int_mismatches": len(int_mismatch), "int_mismatch_examples": int_mismatch[:5],
+            "problems": len(problems), "problem_examples": problems[:5], "max_abs_diff": worst, "tol_nats": tol,
+            "pass": bool(ok)}
+
+
+# -------------------------------------------------------------- tokenizer
+
+
+def tokenizer_sha(tok: Any) -> str:
+    """sha256 of the fast tokenizer's full JSON: equal hashes mean identical tokenisation."""
+    backend = getattr(tok, "backend_tokenizer", None)
+    blob = backend.to_str() if backend is not None else repr(sorted(tok.get_vocab().items()))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+_TOK_FOR_WORKERS: Any = None
+
+
+def _tokenizer_checks_chunk(chunk: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    return ref.tokenizer_checks(_TOK_FOR_WORKERS, chunk)
+
+
+def _add_counts(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for part in parts:
+        for key, value in part.items():
+            if key == "is_fast":
+                out[key] = bool(out.get(key, True) and value)
+            else:
+                out[key] = out.get(key, 0) + int(value)
+    return out
+
+
+def tokenizer_checks_parallel(tok: Any, sentences: Sequence[Mapping[str, Any]], *, workers: int | None = None,
+                              chunk: int = 25) -> dict[str, Any]:
+    """``ref.tokenizer_checks`` split over CPU processes; the counts are summed (they are per-text counts, so
+    the sum equals one serial call exactly). ``workers=1`` runs it serially in this process."""
+    rows = [{"words": s["words"], "text": s["text"], "end": s["end"]} for s in sentences]
+    workers = workers or max(1, (os.cpu_count() or 2) - 1)
+    if workers == 1 or len(rows) <= chunk:
+        return ref.tokenizer_checks(tok, rows)
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    global _TOK_FOR_WORKERS
+    _TOK_FOR_WORKERS = tok
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    pieces = [rows[k:k + chunk] for k in range(0, len(rows), chunk)]
+    try:
+        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("fork")) as pool:
+            parts = list(pool.map(_tokenizer_checks_chunk, pieces))
+    finally:
+        _TOK_FOR_WORKERS = None
+    return _add_counts(parts)
+
+
+def tokenizer_gate(counts: Mapping[str, Any], *, tok_sha: str | None = None,
+                   model_id: str | None = None) -> dict[str, Any]:
+    """The note's gates on ``tokenizer_checks``: ``is_fast`` true and three counts zero; the rest reported."""
+    failed = [] if counts.get("is_fast") else ["is_fast"]
+    failed += [k for k in TOKENIZER_GATES if counts.get(k, 0) != 0]
+    return {**dict(counts), "gates": ["is_fast", *TOKENIZER_GATES], "reported": list(TOKENIZER_REPORTED),
+            "failed": failed, "tokenizer_sha256": tok_sha, "tokenizer_of": model_id, "pass": not failed}
 
 
 def blocking_pass(checks: Mapping[str, Any]) -> bool:
@@ -783,7 +925,7 @@ def item_meta(spec: ModelD, set_name: str, model_meta: Mapping[str, Any], *, n_s
     """The deliverable's meta block: job A's fields, plus set, sentences_sha256 and bos_token."""
     env = tree_runner.environment_meta()
     return {
-        "job": "t4", "job_letter": "D", "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "job": "d", "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "model_id": spec.hf_id, "revision": model_meta.get("revision"), "dtype": spec.dtype,
         "logits_dtype": "float32", "torch": env["versions"].get("torch"),
         "transformers": env["versions"].get("transformers"), "versions": env["versions"], "gpu": env["gpu"],
@@ -792,11 +934,11 @@ def item_meta(spec: ModelD, set_name: str, model_meta: Mapping[str, Any], *, n_s
         "checks": dict(checks),
         "set": set_name, "sentences_sha256": SENTENCES_SHA256, "bos_token": model_meta.get("bos_token"),
         "bos_id": model_meta.get("bos_id"), "n_sentences": n_sentences, "n_spans": n_spans,
-        "fillers": list(ref.FILLERS),
+        "fillers": list(ref.FILLERS), "batch": budget.tokens if budget else None,
         "engine": ("job_d.score_sentences: ref.t4_rows's jobs (built with the reference's own helpers), "
-                   "length-sorted and packed across sentences under a token budget; forward and row formulas "
-                   "as in ref.forward / ref.t4_rows; checked against the unmodified ref.t4_rows "
-                   "(checks.engine_equivalence)"),
+                   "length-sorted and packed across sentences under a token budget ('batch' = padded tokens "
+                   "per forward pass, sized automatically); forward and row formulas as in ref.forward / "
+                   "ref.t4_rows; checked against the unmodified ref.t4_rows (checks.engine_equivalence)"),
         "token_budget": budget.as_meta() if budget else None, "tf32": model_meta.get("tf32"),
         "notebook": "experiment_job_d.ipynb",
         **(dict(extra) if extra else {}),
@@ -811,6 +953,17 @@ def finalize_item(rows: Sequence[Mapping[str, Any]], sentences: Sequence[Mapping
     return tree_runner.finalize(rows, out_path, meta, job="t4", expected=len(sentences))
 
 
+def cache_reference_sha(path: str | os.PathLike) -> str | None:
+    """The reference sha a working cache was written under (its header), or None."""
+    with open(path, encoding="utf-8") as fh:
+        first = fh.readline()
+    try:
+        head = json.loads(first)
+    except json.JSONDecodeError:
+        return None
+    return head.get("reference_code_sha") if head.get("kind") == "header" else None
+
+
 def read_deliverable(path: str | os.PathLike) -> tuple[dict, list[dict]]:
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         lines = [json.loads(line) for line in fh if line.strip()]
@@ -819,9 +972,11 @@ def read_deliverable(path: str | os.PathLike) -> tuple[dict, list[dict]]:
 
 __all__ = [
     "REFERENCE_SHA256", "SENTENCES_SHA256", "SENTENCES_FILE", "ANCHOR_FILE", "SETS", "CACHE_FILLERS", "MODELS_D",
-    "QUEUE", "TIER_DUE", "ModelD", "TokenBudget", "output_name", "checks_name", "work_name", "reference_sha256",
+    "QUEUE", "TIER_DUE", "ModelD", "TokenBudget", "output_name", "checks_name", "work_name", "tokenizer_check_name",
+    "reference_sha256",
     "reference_unmodified", "load_sentences", "load_anchor", "load_span_totals", "cost_units", "resolve_revision",
-    "set_numerics", "load_model_d", "prepare", "score_sentences", "forward_safe", "calibrate_budget", "max_seq_len",
+    "set_numerics", "load_model_d", "load_tokenizer_d", "prepare", "score_sentences", "forward_safe", "calibrate_budget", "max_seq_len",
     "run_item", "check_equivalence", "check_anchor", "check_cache", "check_causality", "check_complete",
-    "blocking_pass", "item_meta", "finalize_item", "read_deliverable",
+    "blocking_pass", "check_job_a", "tokenizer_sha", "tokenizer_checks_parallel", "tokenizer_gate",
+    "cache_reference_sha", "item_meta", "finalize_item", "read_deliverable",
 ]

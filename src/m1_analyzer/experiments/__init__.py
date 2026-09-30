@@ -18,10 +18,10 @@ experiment_8a.ipynb. Tree recovery on the runner -- `tree_runner` runs jobs C
 reference `tree_runner_ref`; `task_8a_js` is job B (8a with Jensen-Shannon and
 the head share). See notebooks/experiment_tree.ipynb. Job D -- `job_d` scores T4
 for six models and a held-out set with a length-packed engine checked against the
-unmodified `tree_runner_ref_v2`; see notebooks/experiment_job_d.ipynb.
+unmodified `tree_runner_ref_v4`; see notebooks/experiment_job_d.ipynb.
 """
 
-from . import experiment_figures, job_d, task_8a_js, tree_runner, tree_runner_ref, tree_runner_ref_v2
+from . import experiment_figures, job_d, task_8a_js, tree_runner, tree_runner_ref, tree_runner_ref_v4
 from .boundaries import (
     BOUNDARY_KINDS, CLAUSE, SENTENCE, SPLITTERS, boundary_positions, sentence_char_spans, starts_sentence,
 )
@@ -167,7 +167,7 @@ from .treebank import (
 )
 
 __all__ = [
-    "experiment_figures", "job_d", "task_8a_js", "tree_runner", "tree_runner_ref", "tree_runner_ref_v2",
+    "experiment_figures", "job_d", "task_8a_js", "tree_runner", "tree_runner_ref", "tree_runner_ref_v4",
     "MODELS_8A_JS", "build_record_8a_js", "head_share", "score_model_8a_js",
     "check_t1_anchor", "check_t4_anchor", "check_t4_cache", "check_t4_causality", "load_1b_cache", "run_t1",
     "run_t4",

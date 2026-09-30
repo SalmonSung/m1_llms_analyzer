@@ -325,11 +325,14 @@ def _iter_t4(rows: Sequence[Mapping[str, Any]]):
 
 
 def check_t4_anchor(rows: Sequence[Mapping[str, Any]], anchor_t4: Sequence[Mapping[str, Any]],
-                    *, tol: float = T4_ANCHOR_TOL_NATS) -> dict[str, Any]:
-    """Check 1: token counts identical, ``total`` / ``suf_sub`` / ``end_sub`` within `tol` nats."""
+                    *, tol: float = T4_ANCHOR_TOL_NATS,
+                    fields: Sequence[tuple[str, int]] = (("total", 0), ("suf_sub", 4), ("end_sub", 5))
+                    ) -> dict[str, Any]:
+    """Check 1: token counts identical, the float `fields` (default ``total`` / ``suf_sub`` / ``end_sub``)
+    within `tol` nats."""
     mine = {r["id"]: r for r in rows}
     count_mismatch, missing, n = [], 0, 0
-    worst = {"total": 0.0, "suf_sub": 0.0, "end_sub": 0.0}
+    worst = {name: 0.0 for name, _ in fields}
     orig_problems = []
     for a in anchor_t4:
         if a["id"] not in mine:
@@ -348,7 +351,7 @@ def check_t4_anchor(rows: Sequence[Mapping[str, Any]], anchor_t4: Sequence[Mappi
                 n += 1
                 if list(ours[1:4]) != list(v[1:4]):
                     count_mismatch.append(f"{a['id']} {filler} {key}: {ours[1:4]} != {v[1:4]}")
-                for name, k in (("total", 0), ("suf_sub", 4), ("end_sub", 5)):
+                for name, k in fields:
                     worst[name] = max(worst[name], abs(float(ours[k]) - float(v[k])))
     passed = not count_mismatch and not missing and not orig_problems and all(w <= tol for w in worst.values())
     return {

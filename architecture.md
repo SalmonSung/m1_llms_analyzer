@@ -100,7 +100,8 @@ m1_llms_analyzer/
 │   │                              float32 model -> the check on the first sentences (hard
 │   │                              stop on failure) -> resumable full run -> deliverable
 │   │                              with its meta block -> Drive.
-│   └── experiment_job_d.ipynb     Job D: one queue of 11 model x set items in delivery
+│   └── experiment_job_d.ipynb     Job D: tokenizer checks for every model (CPU, Llama
+│                                  first) -> one queue of 12 model x set items in delivery
 │                                  order. Smoke test -> status -> per item: model at the
 │                                  full revision, auto-sizing, the checks (hard stop on a
 │                                  blocking failure), resumable run, deliverable + checks
@@ -326,8 +327,9 @@ m1_llms_analyzer/
 │   │   │                          check_t4_cache [optionally on a filler subset],
 │   │   │                          check_t4_causality), run_meta and finalize (meta line +
 │   │   │                          one line per sentence, .gz for A).
-│   │   ├── tree_runner_ref_v2.py  Job D's reference code v2, VERBATIM (sha256 pinned):
-│   │   │                          v1 plus bos_id() and span_keys(). Never edited.
+│   │   ├── tree_runner_ref_v4.py  Job D's reference code v4, VERBATIM (sha256 pinned):
+│   │   │                          v1 plus bos_id(), span_keys(), an 8th row field
+│   │   │                          first_sub and tokenizer_checks(). Never edited.
 │   │   └── job_d.py               Job D: MODELS_D / QUEUE, load_sentences (sha-checked),
 │   │                              resolve_revision (full sha from the note's prefix),
 │   │                              load_model_d (dtype, BOS checked, TF32 off), the engine
@@ -335,8 +337,11 @@ m1_llms_analyzer/
 │   │                              sorted, budget-packed passes across sentences),
 │   │                              calibrate_budget / forward_safe (auto-sizing, OOM
 │   │                              backoff), run_item (resumable, timed Drive mirror), the
-│   │                              checks (equivalence vs ref.t4_rows, anchor, cache,
-│   │                              causality, complete), item_meta, finalize_item.
+│   │                              checks (equivalence vs ref.t4_rows, anchor incl.
+│   │                              first_sub, cache, job A fields 1-7, causality,
+│   │                              complete), tokenizer_checks_parallel / tokenizer_gate
+│   │                              (cached per tokenizer sha), load_tokenizer_d,
+│   │                              cache_reference_sha, item_meta (job "d"), finalize_item.
 │   │
 │   └── utils/
 │       ├── __init__.py            Marks the package; holds no logic.
@@ -429,10 +434,13 @@ m1_llms_analyzer/
     │                              generating, protocol and source-record guards, truncated
     │                              line, dry run, the 9a files byte-unchanged), the record
     │                              shape, the invariants, validation, EOS as an ordinary token.
-    ├── test_job_d.py              v2 and sentence sha256s, the queue, revision resolution,
-    │                              the engine equal to ref.t4_rows on a word-level and a
-    │                              byte-level BPE tokenizer, OOM backoff, packing, resume,
-    │                              the cache check on a filler subset, the deliverable.
+    ├── test_job_d.py              v4 and sentence sha256s, the queue, revision resolution,
+    │                              the engine equal to ref.t4_rows (8 fields) on a word-level
+    │                              and a byte-level BPE tokenizer, first_sub = suf_sub /
+    │                              end_sub where it must be, parallel = serial tokenizer
+    │                              checks and their gates, the job A check, the stale-cache
+    │                              refusal, OOM backoff, packing, resume, the cache check on
+    │                              a filler subset, the deliverable's meta fields.
     ├── test_tree_runner.py        The reference's sha256, jsd_distance / head_share by
     │                              hand, T1 and T4 on the tiny model (resume, header guard,
     │                              batch invariance, causality), every check passing on its
