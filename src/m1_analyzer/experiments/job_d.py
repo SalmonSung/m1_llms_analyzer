@@ -78,6 +78,12 @@ FLOAT_FIELDS = {"total": 0, "suf_sub": 4, "end_sub": 5, "pre_check": 6, "first_s
 #: Anchor fields (the note: 0.05 nats on these four).
 ANCHOR_FIELDS = (("total", 0), ("suf_sub", 4), ("end_sub", 5), ("first_sub", 7))
 N_FIELDS = 8
+#: The engine's version, in the working-cache header and the meta block. "d2": each original sentence is scored
+#: alone (a batch of 1), as ``ref.t4_rows`` does; "d1" packed it with the substitutions.
+ENGINE_VERSION = "d2"
+#: bfloat16 equivalence gates these score fields; pre_check and the original's log-probs are reported (their
+#: pass-to-pass noise is what the note's causality check measures).
+EQUIV_BF16_GATED = ("total", "suf_sub", "end_sub", "first_sub")
 JOB_A_TOL_NATS = 0.01              # fields 1-7 against job A (Qwen3-0.6B main)
 #: tokenizer_checks gates (must hold) and reported counts.
 TOKENIZER_GATES = ("special_in_text", "roundtrip_fail", "offsets_bad")
@@ -463,26 +469,26 @@ def score_sentences(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[st
                     forward: Callable | None = None) -> list[dict]:
     """``{"id", "end", "orig", "rows"}`` per sentence, the values of ``ref.t4_rows``.
 
-    All substitutions of all `sentences` (and their originals) share length-sorted,
-    budget-packed forward passes.
+    Each original sentence is scored alone (a batch of 1), as the reference does: in bfloat16 a
+    one-row pass rounds differently from a batched one, and ``pre_check`` compares the two. All
+    substitutions of all `sentences` share length-sorted, budget-packed forward passes.
     """
-    preps, seqs, owners = [], [], []
+    preps, seqs = [], []
     for s in sentences:
         p = prepare(tok, s["words"], s["keys"], s["end"], fillers)
-        p["orig_at"] = len(seqs)
-        seqs.append(p["ids0"] + p["end_ids"])
         p["first"] = len(seqs)
         seqs.extend(job[2] + p["end_ids"] for job in p["jobs"])
-        owners.append(len(seqs))
         preps.append(p)
     lps: list[np.ndarray | None] = [None] * len(seqs)
     for batch in _batches([len(x) for x in seqs], budget):
         for k, v in zip(batch, forward_safe(mdl, bos, [seqs[k] for k in batch], device, budget, forward)):
             lps[k] = v
+    for p in preps:
+        (p["orig_lp"],) = forward_safe(mdl, bos, [p["ids0"] + p["end_ids"]], device, budget, forward)
     out = []
     for s, p in zip(sentences, preps):
         ids0, end_ids = p["ids0"], p["end_ids"]
-        lp0e = lps[p["orig_at"]]
+        lp0e = p["orig_lp"]
         lp0 = lp0e[:len(ids0)]
         orig = dict(text=p["text"], ids=ids0, lp=[float(v) for v in lp0], end_ids=end_ids,
                     end_lp=[float(v) for v in lp0e[len(ids0):]])
@@ -594,6 +600,7 @@ def _header(item_meta: Mapping[str, Any], set_name: str) -> dict:
     return {"kind": "header", "job": "t4-D", "set": set_name, "model_id": item_meta.get("model_id"),
             "revision": item_meta.get("revision"), "dtype": item_meta.get("dtype"), "bos_id": item_meta.get("bos_id"),
             "reference_code_sha": reference_sha256(), "sentences_sha256": SENTENCES_SHA256,
+            "engine": ENGINE_VERSION,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
 
 
@@ -615,6 +622,9 @@ def run_item(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[str, Any]
         existing, rows, truncated = read_jsonl(path)
         if existing is not None:
             check_header(existing, header, path, unchecked={"kind", "date"})
+            if existing.get("engine", "d1") != ENGINE_VERSION:   # a header from before "engine" existed is d1
+                raise ValueError(f"{path} was written for engine={existing.get('engine', 'd1')!r}, but this run has "
+                                 f"engine={ENGINE_VERSION!r}. Use a different cache_path, or delete the file to rescore.")
             header = existing
         done = {r["id"]: r for r in rows}
         if truncated:
@@ -707,8 +717,9 @@ def check_equivalence(fast_rows: Sequence[Mapping[str, Any]], ref_rows: Sequence
     """The fast engine against the unmodified ``ref.t4_rows`` on the same sentences.
 
     Integer fields and the original ids must be identical. float32: every float within
-    `EQUIV_TOL_F32` nats. bfloat16 (whose rounding depends on batch shape): median
-    within `EQUIV_TOL_BF16_MEDIAN` and Spearman of ``total`` >= `EQUIV_MIN_SPEARMAN_BF16`.
+    `EQUIV_TOL_F32` nats. bfloat16 (whose rounding depends on batch shape): the score fields
+    (`EQUIV_BF16_GATED`) with median within `EQUIV_TOL_BF16_MEDIAN`, and Spearman of ``total``
+    >= `EQUIV_MIN_SPEARMAN_BF16`; ``pre_check`` and the original's log-probs are reported.
     """
     mine = {r["id"]: r for r in fast_rows}
     all_diffs: dict[str, list[float]] = {k: [] for k in FLOAT_FIELDS}
@@ -731,10 +742,11 @@ def check_equivalence(fast_rows: Sequence[Mapping[str, Any]], ref_rows: Sequence
         ok = not problems and all(s["max"] <= EQUIV_TOL_F32 for s in stats.values())
         rule = f"integers identical; every float within {EQUIV_TOL_F32} nats"
     else:
-        ok = (not problems and all(s["median"] <= EQUIV_TOL_BF16_MEDIAN for s in stats.values())
+        ok = (not problems and all(stats[k]["median"] <= EQUIV_TOL_BF16_MEDIAN for k in EQUIV_BF16_GATED)
               and rho >= EQUIV_MIN_SPEARMAN_BF16)
-        rule = (f"integers identical; median |diff| <= {EQUIV_TOL_BF16_MEDIAN} nats; "
-                f"Spearman(total) >= {EQUIV_MIN_SPEARMAN_BF16}")
+        rule = (f"integers identical; median |diff| <= {EQUIV_TOL_BF16_MEDIAN} nats on "
+                f"{', '.join(EQUIV_BF16_GATED)}; Spearman(total) >= {EQUIV_MIN_SPEARMAN_BF16}; "
+                "pre_check and the original's log-probs reported")
     return {"n_sentences": len(ref_rows), "ids": [r["id"] for r in ref_rows], "n_rows": len(ta),
             "problems": len(problems), "problem_examples": problems[:5], "abs_diff": stats,
             "orig_lp_max_abs_diff": float(max(orig, default=0.0)), "spearman_total": rho, "rule": rule,
@@ -935,7 +947,8 @@ def item_meta(spec: ModelD, set_name: str, model_meta: Mapping[str, Any], *, n_s
         "set": set_name, "sentences_sha256": SENTENCES_SHA256, "bos_token": model_meta.get("bos_token"),
         "bos_id": model_meta.get("bos_id"), "n_sentences": n_sentences, "n_spans": n_spans,
         "fillers": list(ref.FILLERS), "batch": budget.tokens if budget else None,
-        "engine": ("job_d.score_sentences: ref.t4_rows's jobs (built with the reference's own helpers), "
+        "engine_version": ENGINE_VERSION,
+        "engine": ("job_d.score_sentences (d2: each original scored alone, as ref.t4_rows does): ref.t4_rows's jobs (built with the reference's own helpers), "
                    "length-sorted and packed across sentences under a token budget ('batch' = padded tokens "
                    "per forward pass, sized automatically); forward and row formulas as in ref.forward / "
                    "ref.t4_rows; checked against the unmodified ref.t4_rows (checks.engine_equivalence)"),
@@ -953,15 +966,28 @@ def finalize_item(rows: Sequence[Mapping[str, Any]], sentences: Sequence[Mapping
     return tree_runner.finalize(rows, out_path, meta, job="t4", expected=len(sentences))
 
 
-def cache_reference_sha(path: str | os.PathLike) -> str | None:
-    """The reference sha a working cache was written under (its header), or None."""
+def cache_header(path: str | os.PathLike) -> dict:
+    """A working cache's header line ({} if it has none)."""
     with open(path, encoding="utf-8") as fh:
         first = fh.readline()
     try:
         head = json.loads(first)
     except json.JSONDecodeError:
-        return None
-    return head.get("reference_code_sha") if head.get("kind") == "header" else None
+        return {}
+    return head if head.get("kind") == "header" else {}
+
+
+def cache_reference_sha(path: str | os.PathLike) -> str | None:
+    """The reference sha a working cache was written under (its header), or None."""
+    return cache_header(path).get("reference_code_sha")
+
+
+def cache_is_current(path: str | os.PathLike) -> tuple[bool, str]:
+    """Can this working cache be resumed? ``(ok, tag)``: same reference sha and engine version; `tag`
+    names what it was written under."""
+    head = cache_header(path)
+    sha, engine = head.get("reference_code_sha"), head.get("engine", "d1")
+    return (sha == REFERENCE_SHA256 and engine == ENGINE_VERSION), f"{str(sha)[:8]}-{engine}"
 
 
 def read_deliverable(path: str | os.PathLike) -> tuple[dict, list[dict]]:
@@ -978,5 +1004,5 @@ __all__ = [
     "set_numerics", "load_model_d", "load_tokenizer_d", "prepare", "score_sentences", "forward_safe", "calibrate_budget", "max_seq_len",
     "run_item", "check_equivalence", "check_anchor", "check_cache", "check_causality", "check_complete",
     "blocking_pass", "check_job_a", "tokenizer_sha", "tokenizer_checks_parallel", "tokenizer_gate",
-    "cache_reference_sha", "item_meta", "finalize_item", "read_deliverable",
+    "cache_reference_sha", "cache_header", "cache_is_current", "ENGINE_VERSION", "item_meta", "finalize_item", "read_deliverable",
 ]

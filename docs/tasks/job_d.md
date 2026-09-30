@@ -48,7 +48,10 @@ computes the same values faster:
 2. **Better batches.** The originals and substitutions of several sentences (about `GROUP_SEQS` = 20,000) are
    pooled, sorted by length and cut into batches of at most `budget` padded tokens. This removes most padding and
    keeps the GPU full even for 5-word sentences.
-3. **Same pass.** `[BOS] + ids + end_ids`, right-padded with an attention mask; `log_softmax(logits.float())`
+3. **The original alone.** Each original sentence is scored in a pass of its own (a batch of 1), as the
+   reference does. In bfloat16 this is what makes `orig.lp` and `pre_check` the reference's (engine version
+   `d2`, recorded in the header and the meta block).
+4. **Same pass.** `[BOS] + ids + end_ids`, right-padded with an attention mask; `log_softmax(logits.float())`
    gathered at the next token, run on row chunks so the float32 copy stays small. The rows use the reference's
    formulas.
 
@@ -70,7 +73,7 @@ budget and the number of backoffs go into `checks` and the meta block.
 | check | models | pass | blocking |
 |---|---|---|---|
 | `tokenizer` | all, per set (cached per tokenizer) | `is_fast`; `special_in_text`, `roundtrip_fail`, `offsets_bad` all 0. `frame_pre_short`, `frame_suf_short` and `end_merge` are reported | yes |
-| `engine_equivalence` | all | the engine against the unmodified `ref.t4_rows` on 3 sentences (the shortest, a middle one and the longest of the first 50). Integer fields and original ids identical. float32: every float within 0.01 nats. bfloat16: median within 0.05 nats and Spearman(total) ≥ 0.9999 | yes |
+| `engine_equivalence` | all | the engine against the unmodified `ref.t4_rows` on 3 sentences (the shortest, a middle one and the longest of the first 50). Integer fields and original ids identical. float32: every float within 0.01 nats. bfloat16: `total`, `suf_sub`, `end_sub`, `first_sub` with median within 0.05 nats and Spearman(total) ≥ 0.9999; `pre_check` and the original's log-probs reported | yes |
 | `anchor` | Qwen3-0.6B, GPT-2 | the note's: `anchor_job_d.json`'s sentences, counts identical, `total` / `suf_sub` / `end_sub` / `first_sub` within 0.05 nats | yes |
 | `job_a_first50`, then `job_a` | Qwen3-0.6B main | fields 1–7 against job A's `tree_t4_qwen3_0.6b.jsonl.gz`: first the first 50 sentences before the run, then every row after it. Integers and original ids identical, floats within 0.01 nats | yes (no deliverable on failure) |
 | `cache` | Qwen3-1.7B, Llama-3.1-8B (main) | the note's: the first 50 main sentences against the 1b span-cost file, on it / there / did / then. `n_tok` identical, Spearman(total) ≥ 0.999 | yes |

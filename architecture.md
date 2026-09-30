@@ -334,7 +334,8 @@ m1_llms_analyzer/
 │   │                              resolve_revision (full sha from the note's prefix),
 │   │                              load_model_d (dtype, BOS checked, TF32 off), the engine
 │   │                              (prepare = ref.t4_rows's jobs; score_sentences = length-
-│   │                              sorted, budget-packed passes across sentences),
+│   │                              sorted, budget-packed passes across sentences, each
+│   │                              original alone as in the reference: ENGINE_VERSION d2),
 │   │                              calibrate_budget / forward_safe (auto-sizing, OOM
 │   │                              backoff), run_item (resumable, timed Drive mirror), the
 │   │                              checks (equivalence vs ref.t4_rows, anchor incl.
