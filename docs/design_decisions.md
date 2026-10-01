@@ -550,6 +550,16 @@ field within 0.01 nats. The float32 files written by d1 (Qwen3-0.6B main and hel
 from d2 by about 1e-4 nats. They passed job A's every-row comparison and are kept; their meta blocks predate
 `engine_version`.
 
+### Job E: the masked engine packs copies, not sentences
+`mlm_rows` makes one masked copy per token (about 20 per substitution) and scores 256 copies per pass in job order.
+`pll_many` pools every copy of a group of sentences, sorts them by length, packs them under job D's token budget,
+and builds the inputs with numpy: it gathers rows from a base matrix, applies the mask to t..u, and reads the target
+before masking. Logits come from the reference's own `masked_logits`, so RoBERTa keeps its head-only path and other
+models keep the full logits. Values stay float64, as in `pll`. All models are float32, so packing changes only
+float rounding (≤ 1e-4 on the tiny tests). `mlm_runner_ref` imports `tree_runner_ref` by its top-level name, so
+`job_e` binds that name to the repo's v4 (the same bytes as the package's) before importing it, and refuses if
+another module already holds the name.
+
 ### Causality is reported, not blocking
 The note reports `pre_check` (job A had 144 rows over 1e-3 from batch numerics, "that is fine") and flags bfloat16
 rows over 0.05 per prefix token. Both numbers go into `checks` and the meta block. The blocking checks are the

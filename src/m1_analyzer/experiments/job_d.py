@@ -509,7 +509,8 @@ def score_sentences(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[st
 
 def calibrate_budget(mdl: Any, bos: int, device: str, *, max_len: int, typical_len: int = 24,
                      safety: float = 0.85, sweep: Sequence[float] = (1.0, 0.5, 0.25), repeats: int = 2,
-                     cpu_tokens: int = 4096) -> tuple[TokenBudget, dict[str, Any]]:
+                     cpu_tokens: int = 4096, probe: Callable[[int, int], Any] | None = None,
+                     bytes_per_token: int | None = None) -> tuple[TokenBudget, dict[str, Any]]:
     """The token budget for this model on this GPU.
 
     1. Start from the free memory after the weights over an estimate of the bytes one
@@ -517,6 +518,9 @@ def calibrate_budget(mdl: Any, bos: int, device: str, *, max_len: int, typical_l
     2. Probe at the longest possible sequence, halving on out-of-memory, until a pass fits.
     3. Time the fitting budget and fractions of it at a typical length; keep the fastest
        (preferring the larger within 3 %).
+
+    `probe(n_rows, length)` runs one pass of `n_rows` random sequences of `length` tokens (default:
+    the causal `_forward`); `bytes_per_token` overrides the starting estimate.
     """
     import torch
 
@@ -529,7 +533,7 @@ def calibrate_budget(mdl: Any, bos: int, device: str, *, max_len: int, typical_l
     hidden = int(getattr(cfg, "hidden_size", 0) or getattr(cfg, "n_embd", 1024))
     inter = int(getattr(cfg, "intermediate_size", 0) or 4 * hidden)
     logit_bytes = torch.finfo(next(mdl.parameters()).dtype).bits // 8
-    per_token = V * (logit_bytes + 4) + 4 * (6 * hidden + 2 * inter)
+    per_token = bytes_per_token or V * (logit_bytes + 4) + 4 * (6 * hidden + 2 * inter)
     start = int(free * safety / per_token)
     tokens = max(max_len + 1, (start // (max_len + 1)) * (max_len + 1))
     report: dict[str, Any] = {"free_gb": round(free / 2 ** 30, 2), "total_gb": round(total / 2 ** 30, 2),
@@ -538,10 +542,13 @@ def calibrate_budget(mdl: Any, bos: int, device: str, *, max_len: int, typical_l
 
     def run(n_tok: int, length: int) -> float:
         rows = max(1, n_tok // (length + 1))
-        seqs = [list(map(int, rng.integers(100, min(V, 30000), size=length))) for _ in range(rows)]
         torch.cuda.synchronize()
         t = time.perf_counter()
-        _forward(mdl, bos, seqs, device)
+        if probe is not None:
+            probe(rows, length)
+        else:
+            seqs = [list(map(int, rng.integers(100, min(V, 30000), size=length))) for _ in range(rows)]
+            _forward(mdl, bos, seqs, device)
         torch.cuda.synchronize()
         return rows * length / (time.perf_counter() - t)
 
@@ -596,35 +603,46 @@ def max_seq_len(tok: Any, sentences: Iterable[Mapping[str, Any]], fillers: Seque
 # ---------------------------------------------------------------- the loop
 
 
-def _header(item_meta: Mapping[str, Any], set_name: str) -> dict:
+def _header(item_meta: Mapping[str, Any], set_name: str, engine: str = ENGINE_VERSION,
+            extra: Mapping[str, Any] | None = None) -> dict:
     return {"kind": "header", "job": "t4-D", "set": set_name, "model_id": item_meta.get("model_id"),
             "revision": item_meta.get("revision"), "dtype": item_meta.get("dtype"), "bos_id": item_meta.get("bos_id"),
             "reference_code_sha": reference_sha256(), "sentences_sha256": SENTENCES_SHA256,
-            "engine": ENGINE_VERSION,
-            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
+            "engine": engine,
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"), **(dict(extra) if extra else {})}
 
 
 def run_item(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[str, Any]], *, set_name: str,
              model_meta: Mapping[str, Any], device: str, budget: TokenBudget, cache_path: str | os.PathLike | None,
              ids: Sequence[str] | None = None, limit: int | None = None, group_seqs: int = 20000,
              mirror_path: str | os.PathLike | None = None, mirror_minutes: float = 15.0,
-             show_progress: bool = True, forward: Callable | None = None) -> list[dict]:
+             show_progress: bool = True, forward: Callable | None = None,
+             score_fn: Callable[[Sequence[Mapping[str, Any]]], list[dict]] | None = None,
+             engine: str = ENGINE_VERSION, header_extra: Mapping[str, Any] | None = None,
+             cost_fn: Callable[[Iterable[Mapping[str, Any]]], int] = None) -> list[dict]:
     """Score `sentences` (resumably) into `cache_path`; returns the rows in input order.
+
+    `score_fn(group)` replaces the causal engine (job E's masked scorer); `engine` and
+    `header_extra` go into the cache header, and resuming a cache of another engine is refused.
 
     Sentences are scored in groups of about `group_seqs` substituted sentences; each
     sentence's line is written (fsynced) when its group finishes, so a disconnect loses at
     most one group. ``seconds`` per sentence is its share of the group's time.
     """
-    header = _header(model_meta, set_name)
+    header = _header(model_meta, set_name, engine, header_extra)
+    cost_fn = cost_fn or cost_units
+    if score_fn is None:
+        def score_fn(group):
+            return score_sentences(tok, mdl, bos, group, device=device, budget=budget, forward=forward)
     done: dict[str, dict] = {}
     path = Path(cache_path) if cache_path else None
     if path is not None and path.exists():
         existing, rows, truncated = read_jsonl(path)
         if existing is not None:
             check_header(existing, header, path, unchecked={"kind", "date"})
-            if existing.get("engine", "d1") != ENGINE_VERSION:   # a header from before "engine" existed is d1
+            if existing.get("engine", "d1") != engine:   # a header from before "engine" existed is d1
                 raise ValueError(f"{path} was written for engine={existing.get('engine', 'd1')!r}, but this run has "
-                                 f"engine={ENGINE_VERSION!r}. Use a different cache_path, or delete the file to rescore.")
+                                 f"engine={engine!r}. Use a different cache_path, or delete the file to rescore.")
             header = existing
         done = {r["id"]: r for r in rows}
         if truncated:
@@ -640,7 +658,7 @@ def run_item(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[str, Any]
     if limit:
         wanted = wanted[: int(limit)]
     pending = [s for s in wanted if s["id"] not in done]
-    total_units = cost_units(pending)
+    total_units = cost_fn(pending)
     groups, cur, n = [], [], 0
     for s in pending:
         cur.append(s)
@@ -664,7 +682,7 @@ def run_item(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[str, Any]
     try:
         for group in groups:
             t0 = time.perf_counter()
-            scored = score_sentences(tok, mdl, bos, group, device=device, budget=budget, forward=forward)
+            scored = score_fn(group)
             dt = time.perf_counter() - t0
             n_seq = sum(r["n_seq"] for r in scored)
             for r in scored:
@@ -672,7 +690,7 @@ def run_item(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[str, Any]
                 done[r["id"]] = r
                 if fh is not None:
                     append_row(fh, r)
-            units_done += cost_units(group)
+            units_done += cost_fn(group)
             if bar is not None:
                 elapsed = time.monotonic() - started
                 eta_h = elapsed / units_done * (total_units - units_done) / 3600 if units_done else float("nan")
@@ -694,8 +712,9 @@ def run_item(tok: Any, mdl: Any, bos: int, sentences: Sequence[Mapping[str, Any]
 # ------------------------------------------------------------------ checks
 
 
-def _float_diffs(a: Mapping[str, Any], b: Mapping[str, Any]) -> tuple[dict[str, list[float]], list[str], list[float], list[float]]:
-    diffs: dict[str, list[float]] = {k: [] for k in FLOAT_FIELDS}
+def _float_diffs(a: Mapping[str, Any], b: Mapping[str, Any], fields: Mapping[str, int] = FLOAT_FIELDS
+                 ) -> tuple[dict[str, list[float]], list[str], list[float], list[float]]:
+    diffs: dict[str, list[float]] = {k: [] for k in fields}
     problems, ta, tb = [], [], []
     for f, table in b["rows"].items():
         for key, v in table.items():
@@ -705,7 +724,7 @@ def _float_diffs(a: Mapping[str, Any], b: Mapping[str, Any]) -> tuple[dict[str, 
                 continue
             if list(w[1:4]) != list(v[1:4]):
                 problems.append(f"{b['id']} {f} {key}: counts {w[1:4]} != {v[1:4]}")
-            for name, k in FLOAT_FIELDS.items():
+            for name, k in fields.items():
                 diffs[name].append(abs(float(w[k]) - float(v[k])))
             ta.append(float(w[0]))
             tb.append(float(v[0]))
@@ -713,7 +732,7 @@ def _float_diffs(a: Mapping[str, Any], b: Mapping[str, Any]) -> tuple[dict[str, 
 
 
 def check_equivalence(fast_rows: Sequence[Mapping[str, Any]], ref_rows: Sequence[Mapping[str, Any]], *,
-                      dtype: str) -> dict[str, Any]:
+                      dtype: str, fields: Mapping[str, int] = FLOAT_FIELDS) -> dict[str, Any]:
     """The fast engine against the unmodified ``ref.t4_rows`` on the same sentences.
 
     Integer fields and the original ids must be identical. float32: every float within
@@ -722,14 +741,14 @@ def check_equivalence(fast_rows: Sequence[Mapping[str, Any]], ref_rows: Sequence
     >= `EQUIV_MIN_SPEARMAN_BF16`; ``pre_check`` and the original's log-probs are reported.
     """
     mine = {r["id"]: r for r in fast_rows}
-    all_diffs: dict[str, list[float]] = {k: [] for k in FLOAT_FIELDS}
+    all_diffs: dict[str, list[float]] = {k: [] for k in fields}
     problems, ta, tb, orig = [], [], [], []
     for r in ref_rows:
         m = mine[r["id"]]
         if m["orig"]["ids"] != r["orig"]["ids"] or m["orig"]["end_ids"] != r["orig"]["end_ids"]:
             problems.append(f"{r['id']}: original ids differ")
         orig.extend(abs(x - y) for x, y in zip(m["orig"]["lp"] + m["orig"]["end_lp"], r["orig"]["lp"] + r["orig"]["end_lp"]))
-        d, p, a, b = _float_diffs(m, r)
+        d, p, a, b = _float_diffs(m, r, fields)
         problems += p
         ta += a
         tb += b
@@ -787,7 +806,7 @@ def check_causality(rows: Sequence[Mapping[str, Any]], dtype: str) -> dict[str, 
 
 
 def check_complete(rows: Sequence[Mapping[str, Any]], sentences: Sequence[Mapping[str, Any]],
-                   fillers: Sequence[str] = ref.FILLERS) -> dict[str, Any]:
+                   fillers: Sequence[str] = ref.FILLERS, n_fields: int = N_FIELDS) -> dict[str, Any]:
     """Every sentence, every filler x span key present; every number finite; n_tok > 0."""
     mine = {r["id"]: r for r in rows}
     missing_sent = [s["id"] for s in sentences if s["id"] not in mine]
@@ -807,7 +826,7 @@ def check_complete(rows: Sequence[Mapping[str, Any]], sentences: Sequence[Mappin
                     missing_rows += 1
                     continue
                 n += 1
-                if len(v) != N_FIELDS or not all(math.isfinite(float(x)) for x in v) or v[1] <= 0:
+                if len(v) != n_fields or not all(math.isfinite(float(x)) for x in v) or v[1] <= 0:
                     bad.append(f"{s['id']} {f} {key}: {v}")
     ok = not missing_sent and not missing_rows and not bad
     return {"n_sentences": len(sentences), "n_rows": n, "missing_sentences": len(missing_sent),
@@ -871,11 +890,11 @@ def tokenizer_sha(tok: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-_TOK_FOR_WORKERS: Any = None
+_FN_FOR_WORKERS: Callable | None = None
 
 
-def _tokenizer_checks_chunk(chunk: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    return ref.tokenizer_checks(_TOK_FOR_WORKERS, chunk)
+def _counts_chunk(chunk: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    return _FN_FOR_WORKERS(chunk)
 
 
 def _add_counts(parts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -893,22 +912,31 @@ def tokenizer_checks_parallel(tok: Any, sentences: Sequence[Mapping[str, Any]], 
                               chunk: int = 25) -> dict[str, Any]:
     """``ref.tokenizer_checks`` split over CPU processes; the counts are summed (they are per-text counts, so
     the sum equals one serial call exactly). ``workers=1`` runs it serially in this process."""
+    return parallel_counts(lambda part: ref.tokenizer_checks(tok, part), sentences, workers=workers, chunk=chunk)
+
+
+def parallel_counts(fn: Callable[[list[dict]], Mapping[str, Any]], sentences: Sequence[Mapping[str, Any]], *,
+                    workers: int | None = None, chunk: int = 25) -> dict[str, Any]:
+    """``fn(rows)`` over chunks of the sentences in forked processes, counts summed (booleans and-ed).
+
+    For count functions that are sums over sentences (the reference's tokenizer checks), the
+    result equals one serial call. ``workers=1`` runs serially in this process."""
     rows = [{"words": s["words"], "text": s["text"], "end": s["end"]} for s in sentences]
     workers = workers or max(1, (os.cpu_count() or 2) - 1)
     if workers == 1 or len(rows) <= chunk:
-        return ref.tokenizer_checks(tok, rows)
+        return dict(fn(rows))
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
 
-    global _TOK_FOR_WORKERS
-    _TOK_FOR_WORKERS = tok
+    global _FN_FOR_WORKERS
+    _FN_FOR_WORKERS = fn
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     pieces = [rows[k:k + chunk] for k in range(0, len(rows), chunk)]
     try:
         with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("fork")) as pool:
-            parts = list(pool.map(_tokenizer_checks_chunk, pieces))
+            parts = list(pool.map(_counts_chunk, pieces))
     finally:
-        _TOK_FOR_WORKERS = None
+        _FN_FOR_WORKERS = None
     return _add_counts(parts)
 
 
@@ -1003,6 +1031,6 @@ __all__ = [
     "reference_unmodified", "load_sentences", "load_anchor", "load_span_totals", "cost_units", "resolve_revision",
     "set_numerics", "load_model_d", "load_tokenizer_d", "prepare", "score_sentences", "forward_safe", "calibrate_budget", "max_seq_len",
     "run_item", "check_equivalence", "check_anchor", "check_cache", "check_causality", "check_complete",
-    "blocking_pass", "check_job_a", "tokenizer_sha", "tokenizer_checks_parallel", "tokenizer_gate",
+    "blocking_pass", "check_job_a", "tokenizer_sha", "tokenizer_checks_parallel", "parallel_counts", "tokenizer_gate",
     "cache_reference_sha", "cache_header", "cache_is_current", "ENGINE_VERSION", "item_meta", "finalize_item", "read_deliverable",
 ]
