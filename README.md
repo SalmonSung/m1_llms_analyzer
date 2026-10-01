@@ -263,9 +263,14 @@ order, after the note's tokenizer checks for every model. The reference v4 (`exp
 auto-sized token budget, and is checked against `ref.t4_rows` before every item. Each item writes
 `tree_t4_<model>_<set>.jsonl.gz` and `checks_<model>_<set>.json` to Drive as soon as it is done.
 
+`notebooks/experiment_job_e.ipynb` runs **job E**: the same substitutions scored by masked LMs (RoBERTa-base,
+RoBERTa-large, optionally ModernBERT-large) with PLL-word-l2r through the unmodified `experiments/mlm_runner_ref.py`
+(9 numbers per row), plus GPT-2-medium with job D's code. Every masked copy is length-sorted and packed under the
+same auto-sized budget; the engine is checked against `mlm_rows` before each item, and the first 20 sentences are
+timed and projected before the full run.
+
 ```python
-from m1_analyzer.experiments import job_d
-sents = job_d.load_sentences(set_name="heldout")                     # sha256 checked
+from m1_analyzer.experiments import job_d                     # sha256 checked
 tok, mdl, bos, device, _, meta = job_d.load_model_d(job_d.MODELS_D["qwen3-0.6b"], anchor=job_d.load_anchor())
 budget, _ = job_d.calibrate_budget(mdl, bos, device, max_len=job_d.max_seq_len(tok, sents))
 rows = job_d.run_item(tok, mdl, bos, sents, set_name="heldout", model_meta=meta, device=device,

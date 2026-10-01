@@ -57,6 +57,8 @@ m1_llms_analyzer/
 │   │                              anchor; no figure, no analysis, by design).
 │   │   ├── tree_runner.md         Tree recovery on the runner: jobs C (T1), B (8a + JS) and
 │   │   │                          A (T4), the reference code, the 1b conventions, the checks.
+│   │   ├── job_e.md               Job E: masked LMs on job D's substitutions, PLL-word-l2r,
+│   │   │                          the engine, the checks, the queue.
 │   │   └── job_d.md               Job D: T4 on six models x {main, held-out} on one A100,
 │   │                              the fast engine, auto-sizing, the checks, the queue.
 │   ├── maintainers/
@@ -100,6 +102,10 @@ m1_llms_analyzer/
 │   │                              float32 model -> the check on the first sentences (hard
 │   │                              stop on failure) -> resumable full run -> deliverable
 │   │                              with its meta block -> Drive.
+│   ├── experiment_job_e.ipynb     Job E: masked LMs + GPT-2-medium. Tokenizer checks (exact
+│   │                              counts) -> one queue in delivery order: model, auto-sizing,
+│   │                              checks incl. timing of the first 20 sentences, resumable
+│   │                              run, deliverable + checks pushed to Drive at once.
 │   └── experiment_job_d.ipynb     Job D: tokenizer checks for every model (CPU, Llama
 │                                  first) -> one queue of 12 model x set items in delivery
 │                                  order. Smoke test -> status -> per item: model at the
@@ -116,6 +122,9 @@ m1_llms_analyzer/
 │   │                              JS for the 1b cache's first 20 sentences (3,505 spans)
 │   │                              and t4_rows for two sentences, Qwen3-0.6B-Base float32
 │   │                              on CPU. Read-only.
+│   ├── job_e/                     Job E's package, verbatim and read-only:
+│   │                              anchor_job_e.json (4 models x 5 sentences, float32 CPU),
+│   │                              runner_note_job_e.md (the request).
 │   └── job_d/                     Job D's package, verbatim and read-only:
 │                                  sentences_3161.jsonl (1,000 main + 2,161 held-out, sha256
 │                                  pinned), anchor_job_d.json (Qwen3-0.6B and GPT-2 rows,
@@ -330,6 +339,16 @@ m1_llms_analyzer/
 │   │   ├── tree_runner_ref_v4.py  Job D's reference code v4, VERBATIM (sha256 pinned):
 │   │   │                          v1 plus bos_id(), span_keys(), an 8th row field
 │   │   │                          first_sub and tokenizer_checks(). Never edited.
+│   │   ├── mlm_runner_ref.py      Job E's reference code, VERBATIM (sha256 pinned): load_mlm,
+│   │   │                          pll (PLL-word-l2r), mlm_rows (9 fields), mlm_checks; it
+│   │   │                          imports tree_runner_ref, bound to v4 by job_e.py.
+│   │   ├── job_e.py               Job E: MODELS_E / QUEUE_E (+ GPT-2-medium via job_d), the
+│   │   │                          note's tokenizer table and gate, load_mlm_e, the masked
+│   │   │                          engine (prepare_mlm, pll_many = every masked copy length-
+│   │   │                          sorted and budget-packed, score_sentences_mlm),
+│   │   │                          calibrate_budget_mlm, run_item_mlm (engine e1), checks
+│   │   │                          (equivalence vs mlm_rows, anchor, complete, timing),
+│   │   │                          item_meta_e (job "e").
 │   │   └── job_d.py               Job D: MODELS_D / QUEUE, load_sentences (sha-checked),
 │   │                              resolve_revision (full sha from the note's prefix),
 │   │                              load_model_d (dtype, BOS checked, TF32 off), the engine
@@ -435,6 +454,11 @@ m1_llms_analyzer/
     │                              generating, protocol and source-record guards, truncated
     │                              line, dry run, the 9a files byte-unchanged), the record
     │                              shape, the invariants, validation, EOS as an ordinary token.
+    ├── test_job_e.py              The masked reference's sha and its v4 import, the anchor
+    │                              file, the queue, the engine equal to mlm_rows on a tiny
+    │                              RoBERTa (head on the masked position) and BERT (full
+    │                              logits), parallel = serial mlm_checks and the exact gate,
+    │                              the anchor fields, resume, meta, the deliverable.
     ├── test_job_d.py              v4 and sentence sha256s, the queue, revision resolution,
     │                              the engine equal to ref.t4_rows (8 fields) on a word-level
     │                              and a byte-level BPE tokenizer, first_sub = suf_sub /
